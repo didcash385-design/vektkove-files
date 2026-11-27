@@ -1,0 +1,16 @@
+import ui
+window "3D Box Physics" 760 560
+ui_scene3d 20 20 720 500
+ui_camera3d 0 4 14
+ui_light3d 4 7 9 1000
+ui_box3d 0 -2 0 10 0.6 6 "#39816A"
+ui_id "floor"
+ui_physics3d "floor" 0 0.7
+ui_sphere3d 0 2 0 0.7 "#F15B40"
+ui_id "ball"
+ui_physics3d "ball" 1 0.7
+ui_box3d 2 1 0 1 1 1 "#38A6D8"
+ui_id "box"
+ui_physics3d "box" 1 0.4
+ui_gravity3d 0 -6 0
+halt

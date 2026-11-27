@@ -1,4 +1,4 @@
-# Vektkove 1.4.0 Manual
+# Vektkove 1.4.1 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -306,7 +306,7 @@ The available meshes are box, sphere, cylinder, cone, torus, and plane. Give eac
 
 FBX, glTF/GLB, STEP, YDR, DFF, TXD, and YTD are not supported on the tested macOS installation. TXD and YTD are texture archives rather than standalone geometry. To use an unsupported model, convert its geometry to OBJ or STL in a compatible external tool first. Check local importer availability with `Vektkove.app/Contents/MacOS/Vektkove --model-formats`.
 
-`ui_physics3d` and `ui_velocity3d` enable collision and motion for named objects. The physics solver uses bounding spheres for every primitive, so contacts are approximate, especially for planes and long shapes. `ui_gravity3d` applies acceleration to enabled dynamic bodies. A `ui_frame3d` block supports the same bounded variable, arithmetic, and branch instructions and frame variables as the 2D callback, plus 3D move, force, and velocity actions. `collision_entered` is true on the tick a contact begins, and `collision_exited` is true on the tick a contact ends. `collision_count` counts unique pairs in the current tick. Frame actions must match the scene dimension.
+`ui_physics3d` and `ui_velocity3d` enable collision and motion for named objects. Box-box and box-sphere contacts use their actual box dimensions and Y-axis spin; sphere-sphere contacts use spheres. Pairs involving planes, imported meshes, cylinders, cones, or tori use approximate bounding spheres. The solver does not simulate rotational dynamics or guarantee continuous collision detection for fast bodies. See `examples/boxphysics3d.vk` for a box floor with falling objects. `ui_gravity3d` applies acceleration to enabled dynamic bodies. A `ui_frame3d` block supports the same bounded variable, arithmetic, and branch instructions and frame variables as the 2D callback, plus 3D move, force, and velocity actions. `collision_entered` is true on the tick a contact begins, and `collision_exited` is true on the tick a contact ends. `collision_count` counts unique pairs in the current tick. Frame actions must match the scene dimension.
 
 ### Interactive 3D and Voxels
 

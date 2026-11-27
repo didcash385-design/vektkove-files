@@ -66,6 +66,8 @@ test: all engine_test
 	./vk run /tmp/vektkove-voxel3d-test.vkb
 	./vk compile examples/physics3d.vk /tmp/vektkove-physics3d-test.vkb
 	./vk run /tmp/vektkove-physics3d-test.vkb
+	./vk compile examples/boxphysics3d.vk /tmp/vektkove-boxphysics3d-test.vkb
+	./vk run /tmp/vektkove-boxphysics3d-test.vkb
 	./vk compile examples/ai.vk /tmp/vektkove-ai-example.vkb
 	./vk compile examples/game2d.vk /tmp/vektkove-game2d-test.vkb
 	./vk run /tmp/vektkove-game2d-test.vkb
@@ -75,6 +77,7 @@ test: all engine_test
 	./vk compile examples/multi_client.vk /tmp/vektkove-multi-client-test.vkb
 	./vkport compile examples/game2d.vk /tmp/vektkove-game2d-portable-test.vkb
 	./vkport compile examples/physics3d.vk /tmp/vektkove-physics3d-portable-test.vkb
+	./vkport compile examples/boxphysics3d.vk /tmp/vektkove-boxphysics3d-portable-test.vkb
 	./vkport compile examples/multi_server.vk /tmp/vektkove-multi-server-portable-test.vkb
 	./vkport compile examples/multi_client.vk /tmp/vektkove-multi-client-portable-test.vkb
 	python3 portable/chat_test.py ./vkport

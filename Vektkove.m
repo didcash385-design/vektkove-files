@@ -354,12 +354,67 @@ static NSArray<NSValue *> *VKMeshForPrimitive(VKOpcode opcode, NSArray *values) 
 @property double mass;
 @property double restitution;
 @property double boundingRadius;
+@property VKOpcode shape;
+@property VKVector3 halfSize;
 @property BOOL physicsEnabled;
 @property NSTimeInterval spinPeriod;
 @property CFTimeInterval spinStart;
 @end
 @implementation VK3DObject
 @end
+
+static BOOL VK3DDetectCollision(VK3DObject *first, VK3DObject *second, VKVector3 *normal, CGFloat *penetration) {
+    if (first.shape == VKUIBox3D && second.shape == VKUIBox3D) {
+        double now = CACurrentMediaTime();
+        double firstAngle = first.spinPeriod > 0 ? (now - first.spinStart) * 2 * M_PI / first.spinPeriod : 0;
+        double secondAngle = second.spinPeriod > 0 ? (now - second.spinStart) * 2 * M_PI / second.spinPeriod : 0;
+        VKVector3 axes[] = {VKVectorRotateY(VKVectorMake(1, 0, 0), firstAngle), VKVectorRotateY(VKVectorMake(0, 0, 1), firstAngle), VKVectorRotateY(VKVectorMake(1, 0, 0), secondAngle), VKVectorRotateY(VKVectorMake(0, 0, 1), secondAngle), VKVectorMake(0, 1, 0)};
+        VKVector3 delta = VKVectorSubtract(second.position, first.position);
+        CGFloat minimum = CGFLOAT_MAX;
+        for (NSUInteger index = 0; index < 5; index++) {
+            VKVector3 axis = axes[index];
+            double firstRadius = fabs(VKVectorDot(axis, axes[0])) * first.halfSize.x + fabs(VKVectorDot(axis, axes[1])) * first.halfSize.z + fabs(axis.y) * first.halfSize.y;
+            double secondRadius = fabs(VKVectorDot(axis, axes[2])) * second.halfSize.x + fabs(VKVectorDot(axis, axes[3])) * second.halfSize.z + fabs(axis.y) * second.halfSize.y;
+            double projected = VKVectorDot(delta, axis), overlap = firstRadius + secondRadius - fabs(projected);
+            if (overlap <= 0) return NO;
+            if (overlap < minimum) { minimum = overlap; *normal = VKVectorScale(axis, projected < 0 ? -1 : 1); }
+        }
+        *penetration = minimum;
+        return YES;
+    }
+    BOOL boxFirst = first.shape == VKUIBox3D && second.shape == VKUISphere3D;
+    BOOL boxSecond = first.shape == VKUISphere3D && second.shape == VKUIBox3D;
+    if (boxFirst || boxSecond) {
+        VK3DObject *box = boxFirst ? first : second;
+        VK3DObject *sphere = boxFirst ? second : first;
+        double angle = box.spinPeriod > 0 ? (CACurrentMediaTime() - box.spinStart) * 2 * M_PI / box.spinPeriod : 0;
+        VKVector3 relative = VKVectorRotateY(VKVectorSubtract(sphere.position, box.position), -angle);
+        VKVector3 half = box.halfSize;
+        VKVector3 nearest = VKVectorMake(MAX(-half.x, MIN(half.x, relative.x)), MAX(-half.y, MIN(half.y, relative.y)), MAX(-half.z, MIN(half.z, relative.z)));
+        VKVector3 delta = VKVectorSubtract(nearest, relative);
+        double distance = VKVectorLength(delta), radius = sphere.boundingRadius;
+        if (distance >= radius) return NO;
+        VKVector3 sphereToBox;
+        if (distance > 0.000001) {
+            sphereToBox = VKVectorScale(delta, 1 / distance);
+            *penetration = radius - distance;
+        } else {
+            double edgeX = half.x - fabs(relative.x), edgeY = half.y - fabs(relative.y), edgeZ = half.z - fabs(relative.z);
+            if (edgeX <= edgeY && edgeX <= edgeZ) { sphereToBox = VKVectorMake(relative.x < 0 ? 1 : -1, 0, 0); *penetration = radius + edgeX; }
+            else if (edgeY <= edgeZ) { sphereToBox = VKVectorMake(0, relative.y < 0 ? 1 : -1, 0); *penetration = radius + edgeY; }
+            else { sphereToBox = VKVectorMake(0, 0, relative.z < 0 ? 1 : -1); *penetration = radius + edgeZ; }
+        }
+        sphereToBox = VKVectorRotateY(sphereToBox, angle);
+        *normal = boxFirst ? VKVectorScale(sphereToBox, -1) : sphereToBox;
+        return YES;
+    }
+    VKVector3 delta = VKVectorSubtract(second.position, first.position);
+    double distance = VKVectorLength(delta);
+    *penetration = first.boundingRadius + second.boundingRadius - distance;
+    if (*penetration <= 0) return NO;
+    *normal = distance > 0.0001 ? VKVectorScale(delta, 1 / distance) : VKVectorMake(1, 0, 0);
+    return YES;
+}
 
 static NSSize VK3DRenderSize(CGFloat viewWidth, CGFloat viewHeight, CGFloat backingScale) {
     const NSUInteger maxBufferBytes = (NSUInteger)2000 * 1024 * 1024;
@@ -613,6 +668,8 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     object.position = VKVectorMake([values[0] doubleValue], [values[1] doubleValue], [values[2] doubleValue]);
     object.mass = 1;
     object.restitution = 0.25;
+    object.shape = opcode;
+    if (opcode == VKUIBox3D) object.halfSize = VKVectorMake([values[3] doubleValue] / 2, [values[4] doubleValue] / 2, [values[5] doubleValue] / 2);
     for (NSValue *packed in object.triangles) {
         VKTriangle3D triangle; [packed getValue:&triangle];
         object.boundingRadius = MAX(object.boundingRadius, MAX(VKVectorLength(triangle.a), MAX(VKVectorLength(triangle.b), VKVectorLength(triangle.c))));
@@ -718,9 +775,9 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
         }
         for (NSUInteger firstIndex = 0; firstIndex < physicsObjects.count; firstIndex++) for (NSUInteger secondIndex = firstIndex + 1; secondIndex < physicsObjects.count; secondIndex++) {
             VK3DObject *first = physicsObjects[firstIndex], *second = physicsObjects[secondIndex];
-            VKVector3 delta = VKVectorSubtract(second.position, first.position);
-            CGFloat distance = VKVectorLength(delta), penetration = first.boundingRadius + second.boundingRadius - distance;
-            if (penetration <= 0) continue;
+            VKVector3 normal;
+            CGFloat penetration = 0;
+            if (!VK3DDetectCollision(first, second, &normal, &penetration)) continue;
             NSArray<NSString *> *pair = @[first.identifier ?: @"", second.identifier ?: @""];
             if (![contacts containsObject:pair]) {
                 if (!contacts.count) { collisionA = pair[0]; collisionB = pair[1]; }
@@ -730,7 +787,6 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
             CGFloat inverseSecond = second.mass > 0 ? 1 / second.mass : 0;
             CGFloat inverseTotal = inverseFirst + inverseSecond;
             if (inverseTotal <= 0) continue;
-            VKVector3 normal = distance > 0.0001 ? VKVectorScale(delta, 1 / distance) : VKVectorMake(1, 0, 0);
             CGFloat correction = MAX(0, penetration - 0.001) * 0.8 / inverseTotal;
             first.position = VKVectorSubtract(first.position, VKVectorScale(normal, correction * inverseFirst));
             second.position = VKVectorAdd(second.position, VKVectorScale(normal, correction * inverseSecond));
@@ -1354,7 +1410,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.4.0";
+    self.window.title = @"Vektkove 1.4.1";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1513,7 +1569,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.4.0",
+        NSAboutPanelOptionApplicationVersion: @"1.4.1",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -3225,6 +3281,40 @@ int main(int argc, const char *argv[]) {
             physics3DView.lastFrameTime = CACurrentMediaTime() - 0.02;
             [physics3DView stepFrame];
             if ([physics3DView.frameVariables[@"collision"] boolValue] || [physics3DView.frameVariables[@"collision_entered"] boolValue] || ![physics3DView.frameVariables[@"collision_exited"] boolValue] || ![physics3DView.frameVariables[@"collision_a"] isEqualToString:@"first"] || ![physics3DView.frameVariables[@"collision_b"] isEqualToString:@"second"]) return 121;
+            VK3DView *shapeTest = [[VK3DView alloc] initWithFrame:NSMakeRect(0, 0, 320, 240)];
+            VK3DObject *floorObject = [shapeTest addPrimitive:VKUIBox3D values:@[@0, @0, @0, @10, @1, @10, @"#808080"]];
+            VK3DObject *ballObject = [shapeTest addPrimitive:VKUISphere3D values:@[@0, @3, @0, @0.5, @"#FF0000"]];
+            floorObject.identifier = @"floor"; floorObject.mass = 0; floorObject.physicsEnabled = YES;
+            ballObject.identifier = @"ball"; ballObject.mass = 0; ballObject.physicsEnabled = YES;
+            shapeTest.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [shapeTest stepFrame];
+            if (shapeTest.previousContacts.count != 0) return 122;
+            ballObject.position = VKVectorMake(0, 0.9, 0);
+            shapeTest.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [shapeTest stepFrame];
+            if (shapeTest.previousContacts.count != 1) return 123;
+            VKVector3 contactNormal;
+            CGFloat contactDepth;
+            if (!VK3DDetectCollision(floorObject, ballObject, &contactNormal, &contactDepth) || contactNormal.y < 0.99 || fabs(contactDepth - 0.1) > 0.001) return 124;
+            if (!VK3DDetectCollision(ballObject, floorObject, &contactNormal, &contactDepth) || contactNormal.y > -0.99) return 125;
+            ballObject.position = VKVectorMake(0, 0, 0);
+            if (!VK3DDetectCollision(floorObject, ballObject, &contactNormal, &contactDepth) || contactNormal.y < 0.99 || fabs(contactDepth - 1) > 0.001) return 126;
+            VK3DObject *boxObject = [shapeTest addPrimitive:VKUIBox3D values:@[@0, @3, @0, @1, @1, @1, @"#00FF00"]];
+            if (VK3DDetectCollision(floorObject, boxObject, &contactNormal, &contactDepth)) return 127;
+            boxObject.position = VKVectorMake(0, 0.9, 0);
+            if (!VK3DDetectCollision(floorObject, boxObject, &contactNormal, &contactDepth) || contactNormal.y < 0.99 || fabs(contactDepth - 0.1) > 0.001) return 128;
+            boxObject.position = VKVectorMake(6.5, 0, 0);
+            boxObject.halfSize = VKVectorMake(2, 0.5, 0.2);
+            if (!VK3DDetectCollision(floorObject, boxObject, &contactNormal, &contactDepth)) return 129;
+            boxObject.spinPeriod = 100;
+            boxObject.spinStart = CACurrentMediaTime() - 25;
+            if (VK3DDetectCollision(floorObject, boxObject, &contactNormal, &contactDepth)) return 130;
+            ballObject.position = VKVectorMake(0, 0.9, 0);
+            ballObject.mass = 1;
+            ballObject.velocity = VKVectorMake(0, -1, 0);
+            shapeTest.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [shapeTest stepFrame];
+            if (ballObject.position.y <= 0.9 || ballObject.velocity.y < 0) return 131;
             [delegate.elements removeAllObjects];
             [delegate.table reloadData];
             delegate.builderTitle.stringValue = @"My Vektkove App";

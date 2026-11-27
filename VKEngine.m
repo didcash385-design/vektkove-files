@@ -482,7 +482,7 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             @(VKUIMove2D): @"id dx dy - Move an object from a frame callback.",
             @(VKUIForce2D): @"id fx fy - Apply force to a dynamic object from a frame callback.",
             @(VKUISetVelocity2D): @"id vx vy - Set an object's velocity from a frame callback.",
-            @(VKUIPhysics3D): @"id mass restitution - Configure a 3D rigid body using bounding-sphere collision.",
+            @(VKUIPhysics3D): @"id mass restitution - Configure a 3D body; box and sphere pairs use shape-aware collision.",
             @(VKUIGravity3D): @"x y z - Set the 3D scene gravity vector.",
             @(VKUIFrame3D): @"- Begin a per-frame 3D callback block.",
             @(VKUIEndFrame3D): @"- End the 3D callback block.",
