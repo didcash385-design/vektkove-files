@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #import "VKEngine.h"
+#define VEKTKOVE_MINI3D
+#include "third_party/mini3d/mini3d.c"
 
 static NSString *const VKLicenseText = @"Copyright (c) 2026 VCCcash\n\n"
     @"Permission is hereby granted, free of charge, to any person obtaining a copy\n"
@@ -376,6 +378,24 @@ static NSSize VK3DRenderSize(CGFloat viewWidth, CGFloat viewHeight, CGFloat back
     return NSMakeSize(pixelWidth, pixelHeight);
 }
 
+static NSUInteger VKClipNearPlane(const VKVector3 input[3], VKVector3 output[4], double nearPlane) {
+    NSUInteger count = 0;
+    VKVector3 previous = input[2];
+    BOOL previousInside = previous.z >= nearPlane;
+    for (NSUInteger index = 0; index < 3; index++) {
+        VKVector3 current = input[index];
+        BOOL currentInside = current.z >= nearPlane;
+        if (currentInside != previousInside) {
+            double fraction = (nearPlane - previous.z) / (current.z - previous.z);
+            output[count++] = VKVectorAdd(previous, VKVectorScale(VKVectorSubtract(current, previous), fraction));
+        }
+        if (currentInside) output[count++] = current;
+        previous = current;
+        previousInside = currentInside;
+    }
+    return count;
+}
+
 static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat redValue, CGFloat greenValue, CGFloat blueValue,
                                 NSUInteger pixelWidth, NSUInteger pixelHeight,
                                 CGFloat viewWidth, CGFloat viewHeight,
@@ -409,10 +429,28 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
     }
 }
 
+static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double depths[3], CGFloat red, CGFloat green, CGFloat blue,
+                                    CGFloat viewWidth, CGFloat viewHeight) {
+    vertex_t vertices[3] = {0};
+    for (NSUInteger index = 0; index < 3; index++) {
+        float inverseDepth = (float)(1.0 / depths[index]);
+        vertices[index].pos.x = (float)(points[index].x * device->width / viewWidth);
+        vertices[index].pos.y = (float)(points[index].y * device->height / viewHeight);
+        vertices[index].rhw = inverseDepth;
+        vertices[index].color.r = (float)MAX(0, MIN(1, red)) * inverseDepth;
+        vertices[index].color.g = (float)MAX(0, MIN(1, green)) * inverseDepth;
+        vertices[index].color.b = (float)MAX(0, MIN(1, blue)) * inverseDepth;
+    }
+    trapezoid_t trapezoids[2];
+    int count = trapezoid_init_triangle(trapezoids, &vertices[0], &vertices[1], &vertices[2]);
+    for (int index = 0; index < count; index++) device_render_trap(device, &trapezoids[index]);
+}
+
 @interface VK3DView : NSView
 @property (strong) NSMutableArray<VK3DObject *> *objects;
 @property (strong) NSMutableArray<NSDictionary *> *lights;
 @property (strong) NSMutableDictionary<NSString *, VK3DObject *> *objectsByID;
+@property (strong) NSSegmentedControl *rendererMode;
 @property CGFloat cameraYaw;
 @property CGFloat cameraPitch;
 @property CGFloat cameraDistance;
@@ -450,11 +488,18 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
         _cameraDistance = 12;
         _cameraTarget = VKVectorMake(0, 0, 0);
         _lastFrameTime = CACurrentMediaTime();
+        _rendererMode = [NSSegmentedControl segmentedControlWithLabels:@[@"Basic", @"Regular"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(changeRendererMode:)];
+        _rendererMode.selectedSegment = 1;
+        _rendererMode.toolTip = @"Choose the 3D renderer";
+        _rendererMode.frame = NSMakeRect(MAX(0, frame.size.width - 154), 6, 148, 24);
+        _rendererMode.autoresizingMask = NSViewMinXMargin;
+        [self addSubview:_rendererMode];
         [self addPointLight:VKVectorMake(4, 7, 9) intensity:900];
     }
     return self;
 }
 - (BOOL)allowsCameraControl { return YES; }
+- (void)changeRendererMode:(id)sender { (void)sender; self.needsDisplay = YES; }
 - (void)setCameraPosition:(VKVector3)position {
     VKVector3 offset = VKVectorSubtract(position, self.cameraTarget);
     self.cameraDistance = MAX(0.5, VKVectorLength(offset));
@@ -659,6 +704,24 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
     unsigned char *pixels = pixelData.mutableBytes;
     float *depthBuffer = depthData.mutableBytes;
     memset(depthBuffer, 0, pixelCount * sizeof(float));
+    device_t mini = {0};
+    IUINT32 **frameRows = NULL;
+    float **depthRows = NULL;
+    if (self.rendererMode.selectedSegment == 1) {
+        frameRows = calloc(pixelHeight, sizeof(*frameRows));
+        depthRows = calloc(pixelHeight, sizeof(*depthRows));
+        if (frameRows && depthRows) {
+            for (NSUInteger row = 0; row < pixelHeight; row++) {
+                frameRows[row] = (IUINT32 *)(pixels + row * pixelWidth * 4);
+                depthRows[row] = depthBuffer + row * pixelWidth;
+            }
+            mini.width = (int)pixelWidth;
+            mini.height = (int)pixelHeight;
+            mini.framebuffer = frameRows;
+            mini.zbuffer = depthRows;
+            mini.render_state = RENDER_STATE_COLOR;
+        }
+    }
     VKVector3 camera = VKVectorAdd(self.cameraTarget, VKVectorMake(self.cameraDistance * cos(self.cameraPitch) * sin(self.cameraYaw), self.cameraDistance * sin(self.cameraPitch), self.cameraDistance * cos(self.cameraPitch) * cos(self.cameraYaw)));
     VKVector3 forward = VKVectorNormalize(VKVectorSubtract(self.cameraTarget, camera));
     VKVector3 right = VKVectorNormalize(VKVectorCross(forward, VKVectorMake(0, 1, 0)));
@@ -675,7 +738,9 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
                 VKVector3 relative = VKVectorSubtract(world[i], camera);
                 view[i] = VKVectorMake(VKVectorDot(relative, right), VKVectorDot(relative, up), VKVectorDot(relative, forward));
             }
-            if (view[0].z <= 0.1 || view[1].z <= 0.1 || view[2].z <= 0.1) continue;
+            VKVector3 clipped[4];
+            NSUInteger clippedCount = VKClipNearPlane(view, clipped, 0.1);
+            if (clippedCount < 3) continue;
             VKVector3 normal = VKVectorNormalize(VKVectorCross(VKVectorSubtract(world[1], world[0]), VKVectorSubtract(world[2], world[0])));
             VKVector3 center = VKVectorScale(VKVectorAdd(VKVectorAdd(world[0], world[1]), world[2]), 1.0 / 3.0);
             CGFloat illumination = 0.22, specular = 0;
@@ -692,16 +757,21 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
             }
             illumination = MIN(1, illumination);
             specular = MIN(0.4, specular);
-            NSPoint points[3];
-            for (NSUInteger i = 0; i < 3; i++) points[i] = NSMakePoint(self.bounds.size.width * 0.5 + view[i].x * focalLength / view[i].z, self.bounds.size.height * 0.5 - view[i].y * focalLength / view[i].z);
-            double depths[3] = {view[0].z, view[1].z, view[2].z};
-            VKRasterizeTriangle(points, depths,
-                                rgb.redComponent * illumination + specular,
-                                rgb.greenComponent * illumination + specular,
-                                rgb.blueComponent * illumination + specular,
-                                pixelWidth, pixelHeight, viewWidth, viewHeight, pixels, depthBuffer);
+            for (NSUInteger corner = 1; corner + 1 < clippedCount; corner++) {
+                VKVector3 projected[] = {clipped[0], clipped[corner], clipped[corner + 1]};
+                NSPoint points[3];
+                for (NSUInteger i = 0; i < 3; i++) points[i] = NSMakePoint(viewWidth * 0.5 + projected[i].x * focalLength / projected[i].z, viewHeight * 0.5 - projected[i].y * focalLength / projected[i].z);
+                double depths[3] = {projected[0].z, projected[1].z, projected[2].z};
+                CGFloat red = rgb.redComponent * illumination + specular;
+                CGFloat green = rgb.greenComponent * illumination + specular;
+                CGFloat blue = rgb.blueComponent * illumination + specular;
+                if (mini.framebuffer) VKMiniRasterizeTriangle(&mini, points, depths, red, green, blue, viewWidth, viewHeight);
+                else VKRasterizeTriangle(points, depths, red, green, blue, pixelWidth, pixelHeight, viewWidth, viewHeight, pixels, depthBuffer);
+            }
         }
     }
+    free(frameRows);
+    free(depthRows);
     unsigned char *planes[5] = {pixels, NULL, NULL, NULL, NULL};
     NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:planes pixelsWide:(NSInteger)pixelWidth pixelsHigh:(NSInteger)pixelHeight bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:(NSInteger)pixelWidth * 4 bitsPerPixel:32];
     [bitmap drawInRect:self.bounds];
@@ -1125,7 +1195,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.0.0";
+    self.window.title = @"Vektkove 1.2.0";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1273,10 +1343,13 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
 
 - (void)showAbout:(id)sender {
     (void)sender;
-    NSAttributedString *credits = [[NSAttributedString alloc] initWithString:VKLicenseText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
+    NSString *licensePath = [NSBundle.mainBundle pathForResource:@"Mini3D-LICENSE" ofType:@"txt"];
+    NSString *miniLicense = licensePath ? [NSString stringWithContentsOfFile:licensePath encoding:NSUTF8StringEncoding error:nil] : @"";
+    NSString *creditText = [NSString stringWithFormat:@"Regular 3D rasterizer: Mini3D by Linwei (skywind3000).\n\n%@\n\n%@", miniLicense, VKLicenseText];
+    NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.0.0",
+        NSAboutPanelOptionApplicationVersion: @"1.2.0",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -2667,6 +2740,25 @@ int main(int argc, const char *argv[]) {
             if (stlTestTriangles.count != 1) { NSLog(@"STL import self-test: %@", stlTestError); return 101; }
             NSSize normalRenderSize = VK3DRenderSize(640, 480, 2);
             NSSize largeRenderSize = VK3DRenderSize(10000, 10000, 2);
+            VKVector3 crossing[] = {VKVectorMake(-1, 0, 0.05), VKVectorMake(1, 0, 1), VKVectorMake(0, 1, 1)};
+            VKVector3 clipped[4];
+            NSUInteger clippedCount = VKClipNearPlane(crossing, clipped, 0.1);
+            if (clippedCount != 4) return 102;
+            for (NSUInteger corner = 0; corner < clippedCount; corner++) if (clipped[corner].z < 0.1 - 1e-9) return 103;
+            IUINT32 testPixels[16][16] = {{0}};
+            float testDepth[16][16] = {{0}};
+            IUINT32 *testPixelRows[16];
+            float *testDepthRows[16];
+            for (NSUInteger row = 0; row < 16; row++) { testPixelRows[row] = testPixels[row]; testDepthRows[row] = testDepth[row]; }
+            device_t testDevice = {0};
+            testDevice.width = 16; testDevice.height = 16; testDevice.framebuffer = testPixelRows;
+            testDevice.zbuffer = testDepthRows; testDevice.render_state = RENDER_STATE_COLOR;
+            NSPoint testTriangle[] = {NSMakePoint(1, 1), NSMakePoint(14, 1), NSMakePoint(1, 14)};
+            double nearDepth[] = {2, 2, 2}, farDepth[] = {4, 4, 4};
+            VKMiniRasterizeTriangle(&testDevice, testTriangle, nearDepth, 1, 0, 0, 16, 16);
+            if (testPixels[3][3] != 0xff0000ffu || testDepth[3][3] <= 0) return 104;
+            VKMiniRasterizeTriangle(&testDevice, testTriangle, farDepth, 0, 0, 1, 16, 16);
+            if (testPixels[3][3] != 0xff0000ffu) return 105;
             NSUInteger largePixelCount = (NSUInteger)largeRenderSize.width * (NSUInteger)largeRenderSize.height;
             if (!NSEqualSizes(normalRenderSize, NSMakeSize(1280, 960)) ||
                 largePixelCount * (4 + sizeof(float)) > (NSUInteger)2000 * 1024 * 1024 ||
@@ -2938,17 +3030,21 @@ int main(int argc, const char *argv[]) {
             for (NSView *subview in delegate.previewWindows.lastObject.contentView.subviews) if ([subview isKindOfClass:VK3DView.class]) renderView = (VK3DView *)subview;
             VK3DObject *hero = renderView.objectsByID[@"hero"];
             if (!renderView || !renderView.allowsCameraControl || renderView.objects.count != 2 || !hero || hero.triangles.count != 12 || hero.spinPeriod != 3 || renderView.lights.count != 2) return 74;
-            [renderView displayIfNeeded];
-            NSBitmapImageRep *renderedFrame = [renderView bitmapImageRepForCachingDisplayInRect:renderView.bounds];
-            if (!renderedFrame) return 76;
-            [renderView cacheDisplayInRect:renderView.bounds toBitmapImageRep:renderedFrame];
-            BOOL hasLitPixel = NO;
-            for (NSInteger y = 0; y < renderedFrame.pixelsHigh && !hasLitPixel; y += 4) for (NSInteger x = 0; x < renderedFrame.pixelsWide; x += 4) {
-                NSColor *pixel = [renderedFrame colorAtX:x y:y];
-                NSColor *rgb = [pixel colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-                if (rgb && (rgb.redComponent > 0.15 || rgb.greenComponent > 0.15 || rgb.blueComponent > 0.15)) { hasLitPixel = YES; break; }
+            for (NSInteger mode = 0; mode < 2; mode++) {
+                renderView.rendererMode.selectedSegment = mode;
+                [renderView changeRendererMode:nil];
+                [renderView displayIfNeeded];
+                NSBitmapImageRep *renderedFrame = [renderView bitmapImageRepForCachingDisplayInRect:renderView.bounds];
+                if (!renderedFrame) return 76;
+                [renderView cacheDisplayInRect:renderView.bounds toBitmapImageRep:renderedFrame];
+                BOOL hasLitPixel = NO;
+                for (NSInteger y = renderedFrame.pixelsHigh / 4; y < renderedFrame.pixelsHigh * 3 / 4 && !hasLitPixel; y += 4) for (NSInteger x = renderedFrame.pixelsWide / 4; x < renderedFrame.pixelsWide * 3 / 4; x += 4) {
+                    NSColor *pixel = [renderedFrame colorAtX:x y:y];
+                    NSColor *rgb = [pixel colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+                    if (rgb && (rgb.redComponent > 0.15 || rgb.greenComponent > 0.15 || rgb.blueComponent > 0.15)) { hasLitPixel = YES; break; }
+                }
+                if (!hasLitPixel) return 77;
             }
-            if (!hasLitPixel) return 77;
             NSMutableArray *actions = [NSMutableArray array];
             NSData *actionCode = [VKEngine compile:@"import ui\nwindow \"Actions\" 400 300\nui_keyboard \"guitar\" 60\nui_shortcut \"F1\" \"Help\"\nui_label \"Spin\" 10 10 100 30\nauto_turn 2" error:&error];
             if (!actionCode || ![VKEngine run:actionCode ui:actions error:&error]) return 60;

@@ -1,4 +1,5 @@
 #import "VKEngine.h"
+#include "portable/vkcodec.h"
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -250,7 +251,10 @@ static NSDictionary *commandTable(void) {
             @[@(VKUIForce3D), @4, @"ui_force3d force3d game_force3d"],
             @[@(VKUISetVelocity3D), @4, @"ui_set_velocity3d set_velocity3d game_set_velocity3d"],
             @[@(VKUIVelocity3D), @4, @"ui_velocity3d velocity3d game_velocity3d"],
-            @[@(VKUIMesh3D), @6, @"ui_mesh3d"]
+            @[@(VKUIMesh3D), @6, @"ui_mesh3d"],
+            @[@(VKEncode), @2, @"encode encode_text text_encode"],
+            @[@(VKDecode), @2, @"decode decode_text text_decode"],
+            @[@(VKCodecList), @0, @"codec_list list_codecs codecs"]
         ];
         NSMutableDictionary *table = [NSMutableDictionary dictionary];
         for (NSArray *definition in definitions) {
@@ -461,7 +465,10 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             @(VKUIForce3D): @"id fx fy fz - Apply force to a dynamic 3D object.",
             @(VKUISetVelocity3D): @"id vx vy vz - Set 3D object velocity from a frame callback.",
             @(VKUIVelocity3D): @"id vx vy vz - Set initial 3D object velocity.",
-            @(VKUIMesh3D): @"path x y z scale color - Import a local 3D mesh."
+            @(VKUIMesh3D): @"path x y z scale color - Import a local 3D mesh.",
+            @(VKEncode): @"name format - Encode the variable's text. Formats include base64, hex, base58, url, json, and chains such as zstd+base64.",
+            @(VKDecode): @"name format - Decode the variable's text from base64, hex, base64+gzip, base64+zstd, and other formats; the result must be UTF-8 text.",
+            @(VKCodecList): @"- List every supported encoding and compression format."
         };
     });
     return descriptions[command[0]];
@@ -491,6 +498,7 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             return @"Math";
         case VKConcat: case VKUpper: case VKLower: case VKLength: case VKEmpty: case VKTrim:
         case VKContains: case VKStartsWith: case VKEndsWith: case VKReplace: case VKText: case VKIsText:
+        case VKEncode: case VKDecode: case VKCodecList:
             return @"Text";
         default: return @"Code";
     }
@@ -543,7 +551,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
     return opcode == VKOut || opcode == VKHalt || opcode == VKLabel || opcode == VKJump || opcode == VKIf || opcode == VKUnless ||
         (opcode >= VKWindow && opcode <= VKUIInput) || (opcode >= VKUIColor && opcode <= VKUIAutoTurn) ||
         opcode == VKImport || opcode == VKUIID || opcode == VKUIBind || (opcode >= VKUIScene3D && opcode <= VKUISpin3D) || opcodeIs2DGameInstruction(opcode) ||
-        opcode == VKTerminalRun || opcode == VKTerminalEcho || opcode == VKTerminalKeywords || opcode == VKCite ||
+        opcode == VKTerminalRun || opcode == VKTerminalEcho || opcode == VKTerminalKeywords || opcode == VKCite || opcode == VKCodecList ||
         opcode == VKServerScript || opcode == VKLocalScript || (opcode >= VKNetListen && opcode <= VKNetBroadcast) ||
         opcode == VKUIGravity2D || opcode == VKUIFrame2D || opcode == VKUIEndFrame2D ||
         opcode == VKUIPhysics2D || opcode == VKUIMove2D || opcode == VKUIForce2D || opcode == VKUISetVelocity2D ||
@@ -1312,6 +1320,11 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             if (output.length > 100000) { if (error) *error = @"Output limit exceeded."; return nil; }
             continue;
         }
+        if (opcode == VKCodecList) {
+            [output appendFormat:@"%s\n", vkc_format_list()];
+            if (output.length > 100000) { if (error) *error = @"Output limit exceeded."; return nil; }
+            continue;
+        }
         NSString *name = operands[0];
         NSCharacterSet *invalidName = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"] invertedSet];
         if (!name.length || [name rangeOfCharacterFromSet:invalidName].location != NSNotFound || [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[name characterAtIndex:0]]) { if (error) *error = @"Invalid variable name."; return nil; }
@@ -1325,6 +1338,20 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         if (opcode == VKIsText) { variables[name] = @([original isKindOfClass:[NSString class]]); continue; }
         if (opcode == VKEmpty) { variables[name] = @([[original description] length] == 0); continue; }
         if (opcode == VKConcat) { variables[name] = [[original description] stringByAppendingString:[value description]]; continue; }
+        if (opcode == VKEncode || opcode == VKDecode) {
+            NSData *input = [[original description] dataUsingEncoding:NSUTF8StringEncoding];
+            vkc_buf transformed = {0};
+            char message[1024] = {0};
+            if (!vkc_transform(opcode == VKEncode, [[value description] UTF8String], input.bytes, input.length, 1, &transformed, message, sizeof(message))) {
+                if (error) *error = [NSString stringWithUTF8String:message];
+                return nil;
+            }
+            NSString *result = [[NSString alloc] initWithBytes:transformed.p length:transformed.n encoding:NSUTF8StringEncoding];
+            free(transformed.p);
+            if (!result) { if (error) *error = @"The result is not valid UTF-8 text."; return nil; }
+            variables[name] = result;
+            continue;
+        }
         if (opcode == VKUpper) { variables[name] = [[original description] uppercaseString]; continue; }
         if (opcode == VKLower) { variables[name] = [[original description] lowercaseString]; continue; }
         if (opcode == VKLength) { variables[name] = @([[original description] length]); continue; }

@@ -1,17 +1,21 @@
 #define Architecture GetEnv("VK_ARCH")
 #define SourceDir GetEnv("VK_SOURCE_DIR")
 #define OutputDir GetEnv("VK_OUTPUT_DIR")
+#define Version GetEnv("VK_VERSION")
+#if Version == ""
+#define Version "1.2.0"
+#endif
 
 [Setup]
 AppId={{B1A2E71E-A721-464E-9F46-B7C9B72B6211}
 AppName=Vektkove
-AppVersion=1.0.0
+AppVersion={#Version}
 AppPublisher=VCCcash
 DefaultDirName={localappdata}\Programs\Vektkove
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir={#OutputDir}
-OutputBaseFilename=vektkove-1.0.0-windows-{#Architecture}-setup
+OutputBaseFilename=vektkove-{#Version}-windows-{#Architecture}-setup
 Compression=lzma2
 SolidCompression=yes
 ChangesEnvironment=yes

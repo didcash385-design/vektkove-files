@@ -21,23 +21,27 @@ portable-test: vk $(SODIUM)/lib/libsodium.a
 	sh portable/net_test.sh /tmp/vkport-test
 	@test "`./vk keywords | wc -l | tr -d ' '`" = "`/tmp/vkport-test keyword-count`"
 
-$(APP): VKEngine.m VKEngine.h Vektkove.m Info.plist Makefile
+$(APP): VKEngine.m VKEngine.h portable/vkcodec.h Vektkove.m third_party/mini3d/mini3d.c third_party/mini3d/LICENSE Info.plist Makefile
 	mkdir -p Vektkove.app/Contents/MacOS
+	mkdir -p Vektkove.app/Contents/Resources
 	cp Info.plist Vektkove.app/Contents/Info.plist
+	cp third_party/mini3d/LICENSE Vektkove.app/Contents/Resources/Mini3D-LICENSE.txt
 	$(CC) $(CFLAGS) -framework Cocoa -framework AVFoundation -framework QuartzCore -framework UniformTypeIdentifiers -framework ModelIO VKEngine.m Vektkove.m -o "$@"
 
-$(LAUNCHER): VKEngine.m VKEngine.h Vektkove.m LauncherInfo.plist Makefile
+$(LAUNCHER): VKEngine.m VKEngine.h portable/vkcodec.h Vektkove.m third_party/mini3d/mini3d.c third_party/mini3d/LICENSE LauncherInfo.plist Makefile
 	mkdir -p VektkoveLauncher.app/Contents/MacOS
+	mkdir -p VektkoveLauncher.app/Contents/Resources
 	cp LauncherInfo.plist VektkoveLauncher.app/Contents/Info.plist
+	cp third_party/mini3d/LICENSE VektkoveLauncher.app/Contents/Resources/Mini3D-LICENSE.txt
 	$(CC) $(CFLAGS) -DVEKTKOVE_LAUNCHER -framework Cocoa -framework AVFoundation -framework QuartzCore -framework UniformTypeIdentifiers -framework ModelIO VKEngine.m Vektkove.m -o "$@"
 
-vk: VKEngine.m VKEngine.h vk.m Makefile
+vk: VKEngine.m VKEngine.h portable/vkcodec.h vk.m Makefile
 	$(CC) $(CFLAGS) -framework Foundation VKEngine.m vk.m -o "$@"
 
-vkport: portable/vkport.c Makefile $(SODIUM)/lib/libsodium.a
+vkport: portable/vkport.c portable/vkcodec.h Makefile $(SODIUM)/lib/libsodium.a
 	$(CC) $(CFLAGS) -pthread -I$(SODIUM)/include portable/vkport.c $(SODIUM)/lib/libsodium.a -lm -o "$@"
 
-engine_test: VKEngine.m VKEngine.h engine_test.m Makefile
+engine_test: VKEngine.m VKEngine.h portable/vkcodec.h engine_test.m Makefile
 	$(CC) $(CFLAGS) -framework Foundation VKEngine.m engine_test.m -o "$@"
 
 test: all engine_test
@@ -59,5 +63,5 @@ test: all engine_test
 	./vkport compile examples/multi_client.vk /tmp/vektkove-multi-client-portable-test.vkb
 	python3 portable/chat_test.py ./vkport
 	sh portable/net_test.sh ./vkport
-	@test `./vk keywords | wc -l | tr -d ' '` -eq 1282
+	@test `./vk keywords | wc -l | tr -d ' '` -eq 1318
 	@test "`./vkport keyword-count`" = "`./vk keywords | wc -l | tr -d ' '`"
