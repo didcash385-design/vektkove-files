@@ -62,6 +62,8 @@ test: all engine_test
 	./vk run /tmp/vektkove-scene3d-test.vkb
 	./vk compile examples/code3d.vk /tmp/vektkove-code3d-test.vkb
 	./vk run /tmp/vektkove-code3d-test.vkb
+	./vk compile examples/voxel3d.vk /tmp/vektkove-voxel3d-test.vkb
+	./vk run /tmp/vektkove-voxel3d-test.vkb
 	./vk compile examples/ai.vk /tmp/vektkove-ai-example.vkb
 	./vk compile examples/game2d.vk /tmp/vektkove-game2d-test.vkb
 	./vk run /tmp/vektkove-game2d-test.vkb
@@ -74,5 +76,5 @@ test: all engine_test
 	./vkport compile examples/multi_client.vk /tmp/vektkove-multi-client-portable-test.vkb
 	python3 portable/chat_test.py ./vkport
 	sh portable/net_test.sh ./vkport
-	@test `./vk keywords | wc -l | tr -d ' '` -eq 1350
+	@test `./vk keywords | wc -l | tr -d ' '` -eq 1374
 	@test "`./vkport keyword-count`" = "`./vk keywords | wc -l | tr -d ' '`"

@@ -87,6 +87,11 @@ int main(void) {
         if (!expect(@"text x \"Hi\"\nconcat x \" there\"\nupper x\nout $x\nlower x\nlength x\nout $x", @"HI THERE\n8\n")) return 6;
         if (!expect(@"text message \"Hello\"\nencode message \"base64\"\nout $message\ndecode message \"base64\"\nout $message", @"SGVsbG8=\nHello\n")) return 70;
         if (!expect(@"text message \"Hello\"\nencode message \"zstd+base64\"\ndecode message \"base64+zstd\"\nout $message", @"Hello\n")) return 71;
+        NSMutableArray *key3DUI = [NSMutableArray array];
+        NSData *key3DCode = [VKEngine compile:@"import ui\nwindow \"3D\" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 \"#FF0000\"\nui_id \"cube\"\nui_keymove3d \"cube\" \"w\" 0 0 -1" error:&error];
+        if (!key3DCode || ![VKEngine run:key3DCode ui:key3DUI error:&error]) { NSLog(@"3D key binding failed: %@", error); return 75; }
+        NSArray *voxelDiagnostics = [VKEngine diagnose:@"import ui\nwindow \"World\" 100 100\nui_voxel3d 0 0 0 \"#FFFFFF\""];
+        if (![[voxelDiagnostics componentsJoinedByString:@"\n"] containsString:@"Add ui_scene3d"]) return 76;
         NSData *codecList = [VKEngine compile:@"codec_list" error:&error];
         if (!codecList || ![[VKEngine run:codecList error:&error] containsString:@"base64"]) return 72;
         NSMutableString *largeSource = [NSMutableString stringWithString:@"text shared \"value\"\nimport ui\nwindow \"Many controls\" 100 100\n"];

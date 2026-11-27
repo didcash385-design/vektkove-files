@@ -1,4 +1,4 @@
-# Vektkove 1.3.1 Manual
+# Vektkove 1.3.2 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -307,6 +307,14 @@ The available meshes are box, sphere, cylinder, cone, torus, and plane. Give eac
 FBX, glTF/GLB, STEP, YDR, DFF, TXD, and YTD are not supported on the tested macOS installation. TXD and YTD are texture archives rather than standalone geometry. To use an unsupported model, convert its geometry to OBJ or STL in a compatible external tool first. Check local importer availability with `Vektkove.app/Contents/MacOS/Vektkove --model-formats`.
 
 `ui_physics3d` and `ui_velocity3d` enable collision and motion for named objects. The physics solver uses bounding spheres for every primitive, so contacts are approximate, especially for planes and long shapes. `ui_gravity3d` applies acceleration to enabled dynamic bodies. A `ui_frame3d` block supports the same bounded variable, arithmetic, and branch instructions and frame variables as the 2D callback, plus 3D move, force, and velocity actions. Frame actions must match the scene dimension.
+
+### Interactive 3D and Voxels
+
+Use `ui_keymove3d "id" "key" dx dy dz` to move a named 3D object when a key is pressed. Use `ui_remove3d "id"` to remove a named object at startup or inside a `ui_frame3d` callback. Key bindings use the same focused-window input as 2D controls; if multiple actions use the same key, the last binding takes precedence.
+
+Use `ui_voxel3d x y z "#RRGGBB"` to add a unit block at integer coordinates, and `ui_voxel_controls3d step "#RRGGBB"` to enable editing and choose the movement step and placed-block color. In the 3D view, use W/A/S/D to fly horizontally, E or Space to rise, Q to descend, and drag with the left mouse button to look. Left-click a block to break it; right-click its face to place a block next to it. Blocks must be within 12 world units. Duplicate block coordinates are ignored.
+
+Open `examples/voxel3d.vk` in the macOS editor and choose **Test Code** to try an interactive world. The command-line runners compile and validate the same source but do not display a window. This is a creative flying and editing foundation, not a complete survival game: voxel edits are not saved, and it has no terrain generation, inventory, player collision, or mining rules.
 
 The 2D game scene supports bounded rectangles and circles, per-frame velocity, edge bouncing, and keyboard movement. The UI Maker's **2D Game** starter generates a working WASD-controlled scene; edit its object IDs, positions, colors, velocity, and key deltas in the table or generated source. For example, see `examples/game2d.vk`.
 

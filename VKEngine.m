@@ -274,7 +274,11 @@ static NSDictionary *commandTable(void) {
             @[@(VKAIConfigure), @2, @"ai_config ai_configure"],
             @[@(VKTrain), @2, @"train ai_train"],
             @[@(VKAIClear), @0, @"ai_clear clear_knowledge"],
-            @[@(VKAIAsk), @2, @"ai_ask ask_ai"]
+            @[@(VKAIAsk), @2, @"ai_ask ask_ai"],
+            @[@(VKUIKeyMove3D), @5, @"ui_keymove3d keymove3d game_keymove3d"],
+            @[@(VKUIVoxel3D), @4, @"ui_voxel3d"],
+            @[@(VKUIVoxelControls3D), @2, @"ui_voxel_controls3d"],
+            @[@(VKUIRemove3D), @1, @"ui_remove3d"]
         ];
         NSMutableDictionary *table = [NSMutableDictionary dictionary];
         for (NSArray *definition in definitions) {
@@ -304,7 +308,8 @@ static BOOL opcodeIs2DGameInstruction(VKOpcode opcode) {
 
 static BOOL opcodeIs3DGameInstruction(VKOpcode opcode) {
     return opcode == VKUIPhysics3D || opcode == VKUIGravity3D || opcode == VKUIFrame3D || opcode == VKUIEndFrame3D ||
-        opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D || opcode == VKUIVelocity3D || opcode == VKUIMesh3D;
+        opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D || opcode == VKUIVelocity3D || opcode == VKUIMesh3D || opcode == VKUIKeyMove3D ||
+        opcode == VKUIVoxel3D || opcode == VKUIVoxelControls3D || opcode == VKUIRemove3D;
 }
 
 static BOOL opcodeIsUIInstruction(VKOpcode opcode) {
@@ -321,7 +326,7 @@ static BOOL opcodeIsFrameCallbackInstruction(VKOpcode opcode) {
         case VKSin: case VKCos: case VKTan: case VKAsin: case VKAcos: case VKAtan: case VKLog: case VKLog10: case VKExp:
         case VKSign: case VKTruncate: case VKLabel: case VKJump: case VKIf: case VKUnless:
         case VKUIMove2D: case VKUIForce2D: case VKUISetVelocity2D:
-        case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: return YES;
+        case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: case VKUIRemove3D: return YES;
         default: return NO;
     }
 }
@@ -492,7 +497,11 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             @(VKAIConfigure): @"backend model - Select the ollama or openai backend and model.",
             @(VKTrain): @"source value - Add knowledge from text, file, HTTPS URL, or a Wikipedia topic.",
             @(VKAIClear): @"- Clear the current program's AI knowledge.",
-            @(VKAIAsk): @"name question - Ask the configured AI and store its answer in name."
+            @(VKAIAsk): @"name question - Ask the configured AI and store its answer in name.",
+            @(VKUIKeyMove3D): @"id key dx dy dz - Move a named 3D object when a key is pressed.",
+            @(VKUIVoxel3D): @"x y z color - Add a unit block at integer coordinates.",
+            @(VKUIVoxelControls3D): @"step color - Enable fly controls and mouse block editing.",
+            @(VKUIRemove3D): @"id - Remove a named 3D object, including from a 3D frame callback."
         };
     });
     return descriptions[command[0]];
@@ -511,7 +520,8 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
         case VKUIPhysics2D: case VKUIGravity2D: case VKUIFrame2D: case VKUIEndFrame2D:
         case VKUIMove2D: case VKUIForce2D: case VKUISetVelocity2D:
         case VKUIPhysics3D: case VKUIGravity3D: case VKUIFrame3D: case VKUIEndFrame3D:
-        case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: case VKUIVelocity3D: case VKUIMesh3D: return @"UI";
+        case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: case VKUIVelocity3D: case VKUIMesh3D: case VKUIKeyMove3D:
+        case VKUIVoxel3D: case VKUIVoxelControls3D: case VKUIRemove3D: return @"UI";
         case VKIf: case VKUnless: case VKJump: case VKLabel: case VKEqual: case VKNotEqual:
         case VKLess: case VKLessEqual: case VKGreater: case VKGreaterEqual: case VKAnd: case VKOr: case VKNot:
             return @"Logic";
@@ -655,7 +665,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         if (opcode == VKUIScene3D) {
             if (sawScene3D) [result addObject:[NSString stringWithFormat:@"Error %@: A window can only have one 3D viewport.", position]];
             sawScene3D = YES;
-        } else if (((opcode >= VKUICamera3D && opcode <= VKUISpin3D) || opcode == VKUIMesh3D) && !sawScene3D) {
+        } else if (((opcode >= VKUICamera3D && opcode <= VKUISpin3D) || opcodeIs3DGameInstruction(opcode)) && !sawScene3D) {
             [result addObject:[NSString stringWithFormat:@"Error %@: Add ui_scene3d before 3D scene instructions.", position]];
         }
         if (opcode == VKUIScene2D) {
@@ -1078,8 +1088,8 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                     return nil;
                 }
                 if (callbackOpcode == VKUIMove2D || callbackOpcode == VKUIForce2D || callbackOpcode == VKUISetVelocity2D ||
-                    callbackOpcode == VKUIMove3D || callbackOpcode == VKUIForce3D || callbackOpcode == VKUISetVelocity3D) {
-                    BOOL action3D = callbackOpcode == VKUIMove3D || callbackOpcode == VKUIForce3D || callbackOpcode == VKUISetVelocity3D;
+                    callbackOpcode == VKUIMove3D || callbackOpcode == VKUIForce3D || callbackOpcode == VKUISetVelocity3D || callbackOpcode == VKUIRemove3D) {
+                    BOOL action3D = callbackOpcode == VKUIMove3D || callbackOpcode == VKUIForce3D || callbackOpcode == VKUISetVelocity3D || callbackOpcode == VKUIRemove3D;
                     if (action3D != frame3D) { if (error) *error = @"Frame callback actions must match the scene dimension."; return nil; }
                     NSString *callbackError = nil;
                     NSArray *callbackOperands = instruction[1];
@@ -1134,6 +1144,29 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                     if (error) *error = @"ui_physics3d needs an object id, mass from 0 to 10000, and restitution from 0 to 1.";
                     return nil;
                 }
+            } else if (opcode == VKUIVoxel3D || opcode == VKUIVoxelControls3D) {
+                NSUInteger numericCount = opcode == VKUIVoxel3D ? 3 : 1;
+                BOOL valid = YES;
+                for (NSUInteger component = 0; component < numericCount && valid; component++) {
+                    id value = values[component];
+                    valid = [value isKindOfClass:NSNumber.class] && fabs([value doubleValue]) <= 10000;
+                    if (opcode == VKUIVoxel3D && valid) valid = floor([value doubleValue]) == [value doubleValue];
+                }
+                if (opcode == VKUIVoxelControls3D && valid) valid = [values[0] doubleValue] > 0 && [values[0] doubleValue] <= 10;
+                NSString *color = [values.lastObject isKindOfClass:NSString.class] ? values.lastObject : nil;
+                NSRegularExpression *hex = [NSRegularExpression regularExpressionWithPattern:@"^#[0-9A-Fa-f]{6}$" options:0 error:nil];
+                valid = valid && color && [hex numberOfMatchesInString:color options:0 range:NSMakeRange(0, color.length)] == 1;
+                if (!valid) { if (error) *error = opcode == VKUIVoxel3D ? @"ui_voxel3d needs integer coordinates and a #RRGGBB color." : @"ui_voxel_controls3d needs a step from 0 to 10 and a #RRGGBB color."; return nil; }
+            } else if (opcode == VKUIRemove3D) {
+                NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
+                if (!identifier.length || !opcodeIs3DPrimitive([uiIDTypes[identifier] unsignedCharValue])) { if (error) *error = @"ui_remove3d needs an existing 3D object id."; return nil; }
+            } else if (opcode == VKUIKeyMove3D) {
+                NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
+                NSString *key = [values[1] isKindOfClass:NSString.class] ? values[1] : nil;
+                BOOL valid = identifier.length && opcodeIs3DPrimitive([uiIDTypes[identifier] unsignedCharValue]) && key.length && key.length <= 16;
+                for (NSUInteger component = 2; component < 5 && valid; component++) valid = [values[component] isKindOfClass:NSNumber.class] && fabs([values[component] doubleValue]) <= 10000;
+                if (!valid) { if (error) *error = @"ui_keymove3d needs a 3D object id, key, and three numeric movement values."; return nil; }
+                values[1] = key.lowercaseString;
             } else if (opcode == VKUIVelocity3D) {
                 NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
                 VKOpcode type = identifier ? [uiIDTypes[identifier] unsignedCharValue] : 0;
@@ -1488,9 +1521,9 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             continue;
         }
         if (opcode == VKUIMove2D || opcode == VKUIForce2D || opcode == VKUISetVelocity2D ||
-            opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D) {
-            BOOL action3D = opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D;
-            NSUInteger operandCount = action3D ? 4 : 3;
+            opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D || opcode == VKUIRemove3D) {
+            BOOL action3D = opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D || opcode == VKUIRemove3D;
+            NSUInteger operandCount = opcode == VKUIRemove3D ? 1 : action3D ? 4 : 3;
             NSMutableArray *values = [NSMutableArray arrayWithCapacity:operandCount];
             NSString *runtimeError = nil;
             for (NSString *operand in operands) {

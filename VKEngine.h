@@ -21,7 +21,8 @@ typedef NS_ENUM(uint8_t, VKOpcode) {
 	VKUIPhysics3D, VKUIGravity3D, VKUIFrame3D, VKUIEndFrame3D, VKUIMove3D, VKUIForce3D, VKUISetVelocity3D, VKUIVelocity3D,
 VKUIMesh3D,
 		VKEncode, VKDecode, VKCodecList,
-		VKAIConfigure, VKTrain, VKAIClear, VKAIAsk
+		VKAIConfigure, VKTrain, VKAIClear, VKAIAsk,
+		VKUIKeyMove3D, VKUIVoxel3D, VKUIVoxelControls3D, VKUIRemove3D
 };
 
 @interface VKEngine : NSObject

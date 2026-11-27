@@ -16,7 +16,7 @@
 #include <sodium.h>
 #include "vkcodec.h"
 #include "vkai.h"
-#define VK_VERSION "1.3.1"
+#define VK_VERSION "1.3.2"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
@@ -62,7 +62,8 @@ enum {
     OP_UIPHYSICS3D, OP_UIGRAVITY3D, OP_UIFRAME3D, OP_UIENDFRAME3D, OP_UIMOVE3D, OP_UIFORCE3D, OP_UISETVELOCITY3D, OP_UIVELOCITY3D,
     OP_UIMESH3D,
     OP_ENCODE, OP_DECODE, OP_CODECLIST,
-    OP_AICONFIGURE, OP_TRAIN, OP_AICLEAR, OP_AIASK
+    OP_AICONFIGURE, OP_TRAIN, OP_AICLEAR, OP_AIASK,
+    OP_UIKEYMOVE3D, OP_UIVOXEL3D, OP_UIVOXELCONTROLS3D, OP_UIREMOVE3D
 };
 
 typedef struct { const char *aliases; int opcode; int arity; } Definition;
@@ -131,7 +132,10 @@ static const Definition definitions[] = {
     {"encode encode_text text_encode", OP_ENCODE, 2}, {"decode decode_text text_decode", OP_DECODE, 2},
     {"codec_list list_codecs codecs", OP_CODECLIST, 0},
     {"ai_config ai_configure", OP_AICONFIGURE, 2}, {"train ai_train", OP_TRAIN, 2},
-    {"ai_clear clear_knowledge", OP_AICLEAR, 0}, {"ai_ask ask_ai", OP_AIASK, 2}
+    {"ai_clear clear_knowledge", OP_AICLEAR, 0}, {"ai_ask ask_ai", OP_AIASK, 2},
+    {"ui_keymove3d keymove3d game_keymove3d", OP_UIKEYMOVE3D, 5},
+    {"ui_voxel3d", OP_UIVOXEL3D, 4}, {"ui_voxel_controls3d", OP_UIVOXELCONTROLS3D, 2},
+    {"ui_remove3d", OP_UIREMOVE3D, 1}
 };
 #define DEFINITION_COUNT (sizeof(definitions) / sizeof(definitions[0]))
 
@@ -260,7 +264,7 @@ static int compile_source(const char *source, size_t length, Buffer *out, char *
                        command.opcode == OP_UIID || command.opcode == OP_UIBIND ||
                        (command.opcode >= OP_UISCENE3D && command.opcode <= OP_UISPIN3D) ||
                        (command.opcode >= OP_UISCENE2D && command.opcode <= OP_UIKEYMOVE2D) ||
-                       (command.opcode >= OP_UIPHYSICS2D && command.opcode <= OP_UIMESH3D)) {
+                       (command.opcode >= OP_UIPHYSICS2D && command.opcode <= OP_UIMESH3D) || (command.opcode >= OP_UIKEYMOVE3D && command.opcode <= OP_UIREMOVE3D)) {
                 saw_ui = 1;
                 if (!imported_ui) {
                     snprintf(message, message_size, "Line %zu: Add import ui before using UI instructions.", line_number);
@@ -695,7 +699,7 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             imported_ui = 1;
             continue;
         }
-        int is_ui = (op >= OP_WINDOW && op <= OP_UIINPUT) || (op >= OP_UICOLOR && op <= OP_UIAUTOTURN) || op == OP_UIID || op == OP_UIBIND || (op >= OP_UISCENE3D && op <= OP_UISPIN3D) || (op >= OP_UISCENE2D && op <= OP_UIKEYMOVE2D) || (op >= OP_UIPHYSICS2D && op <= OP_UIMESH3D);
+        int is_ui = (op >= OP_WINDOW && op <= OP_UIINPUT) || (op >= OP_UICOLOR && op <= OP_UIAUTOTURN) || op == OP_UIID || op == OP_UIBIND || (op >= OP_UISCENE3D && op <= OP_UISPIN3D) || (op >= OP_UISCENE2D && op <= OP_UIKEYMOVE2D) || (op >= OP_UIPHYSICS2D && op <= OP_UIMESH3D) || (op >= OP_UIKEYMOVE3D && op <= OP_UIREMOVE3D);
         if (is_ui && !imported_ui) { snprintf(message, size, "Add 'import ui' before using UI instructions."); goto done; }
         if (op == OP_SERVERSCRIPT || op == OP_LOCALSCRIPT) {
             if (script_role || index != 0) { snprintf(message, size, "Declare one script role as the first instruction."); goto done; }
@@ -996,15 +1000,15 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                     callback_op == OP_LOG10 || callback_op == OP_EXP || callback_op == OP_SIGN || callback_op == OP_TRUNC ||
                     callback_op == OP_LABEL || callback_op == OP_JUMP || callback_op == OP_IF || callback_op == OP_UNLESS ||
                     callback_op == OP_UIMOVE2D || callback_op == OP_UIFORCE2D || callback_op == OP_UISETVELOCITY2D ||
-                    callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D;
+                    callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D || callback_op == OP_UIREMOVE3D;
                 if (!allowed) { snprintf(message, size, "Frame callbacks allow variable, branch, and 2D action instructions only."); goto done; }
                 if (callback_op == OP_UIMOVE2D || callback_op == OP_UIFORCE2D || callback_op == OP_UISETVELOCITY2D ||
-                    callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D) {
-                    int action3d = callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D;
+                    callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D || callback_op == OP_UIREMOVE3D) {
+                    int action3d = callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D || callback_op == OP_UIREMOVE3D;
                     if (action3d != frame3d) { snprintf(message, size, "Frame callback actions must match the scene dimension."); goto done; }
                     Value parts[4] = {{0}};
                     int good = 1;
-                    size_t operand_count = action3d ? 4 : 3;
+                    size_t operand_count = callback_op == OP_UIREMOVE3D ? 1 : action3d ? 4 : 3;
                     for (size_t operand = 0; operand < operand_count && good; operand++) if (code[callback].operands[operand][0] != '$') good = resolve(code[callback].operands[operand], &variables, &parts[operand], message, size);
                     size_t object_id = 0;
                     while (good && object_id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[object_id], parts[0].text ? parts[0].text : ""))) object_id++;
@@ -1065,9 +1069,9 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             last_ui_op = op;
             continue;
         }
-        if (op >= OP_UIPHYSICS3D && op <= OP_UIVELOCITY3D) {
+        if ((op >= OP_UIPHYSICS3D && op <= OP_UIVELOCITY3D) || (op >= OP_UIKEYMOVE3D && op <= OP_UIREMOVE3D)) {
             if (!has_scene3d) { snprintf(message, size, "Add ui_scene3d before 3D physics instructions."); goto done; }
-            Value parts[4] = {{0}};
+            Value parts[5] = {{0}};
             int good = 1;
             for (size_t k = 0; k < ins->count && good; k++) good = resolve(ins->operands[k], &variables, &parts[k], message, size);
             if (op == OP_UIGRAVITY3D) {
@@ -1075,6 +1079,28 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                     snprintf(message, size, "ui_gravity3d needs one scene and numeric gravity values from -10000 to 10000."); good = 0;
                 }
                 has_gravity3d = good;
+            } else if (op == OP_UIVOXEL3D || op == OP_UIVOXELCONTROLS3D) {
+                size_t numeric_count = op == OP_UIVOXEL3D ? 3 : 1;
+                int valid = good;
+                for (size_t component = 0; component < numeric_count && valid; component++) {
+                    valid = parts[component].is_number && fabs(parts[component].number) <= 10000;
+                    if (op == OP_UIVOXEL3D && valid) valid = floor(parts[component].number) == parts[component].number;
+                }
+                if (op == OP_UIVOXELCONTROLS3D && valid) valid = parts[0].number > 0 && parts[0].number <= 10;
+                const char *color = parts[ins->count - 1].text;
+                valid = valid && !parts[ins->count - 1].is_number && color && strlen(color) == 7 && color[0] == '#';
+                for (size_t digit = 1; valid && digit < 7; digit++) if (!isxdigit((unsigned char)color[digit])) valid = 0;
+                if (!valid) { snprintf(message, size, op == OP_UIVOXEL3D ? "ui_voxel3d needs integer coordinates and a #RRGGBB color." : "ui_voxel_controls3d needs a step from 0 to 10 and a #RRGGBB color."); good = 0; }
+            } else if (op == OP_UIREMOVE3D) {
+                size_t id = 0;
+                while (good && id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[id], parts[0].text ? parts[0].text : ""))) id++;
+                if (!good || id == ui_id_count || !((ui_id_types[id] >= OP_UIBOX3D && ui_id_types[id] <= OP_UIPLANE3D) || ui_id_types[id] == OP_UIMESH3D)) { snprintf(message, size, "ui_remove3d needs an existing 3D object id."); good = 0; }
+            } else if (op == OP_UIKEYMOVE3D) {
+                size_t id = 0;
+                while (good && id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[id], parts[0].text ? parts[0].text : ""))) id++;
+                int valid = good && id < ui_id_count && ((ui_id_types[id] >= OP_UIBOX3D && ui_id_types[id] <= OP_UIPLANE3D) || ui_id_types[id] == OP_UIMESH3D) && !parts[1].is_number && parts[1].text && parts[1].text[0] && strlen(parts[1].text) <= 16;
+                for (size_t component = 2; component < 5 && valid; component++) valid = parts[component].is_number && fabs(parts[component].number) <= 10000;
+                if (!valid) { snprintf(message, size, "ui_keymove3d needs a 3D object id, key, and three numeric movement values."); good = 0; }
             } else if (op == OP_UIPHYSICS3D || op == OP_UIVELOCITY3D) {
                 size_t id = 0;
                 while (good && id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[id], parts[0].text ? parts[0].text : ""))) id++;

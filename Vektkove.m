@@ -450,6 +450,9 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
 @property (strong) NSMutableArray<VK3DObject *> *objects;
 @property (strong) NSMutableArray<NSDictionary *> *lights;
 @property (strong) NSMutableDictionary<NSString *, VK3DObject *> *objectsByID;
+@property (strong) NSMutableDictionary<NSString *, VK3DObject *> *voxelObjects;
+@property (copy) NSString *voxelColor;
+@property CGFloat voxelStep;
 @property (strong) NSSegmentedControl *rendererMode;
 @property CGFloat cameraYaw;
 @property CGFloat cameraPitch;
@@ -460,6 +463,8 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
 @property CGFloat dragPitch;
 @property VKVector3 dragTarget;
 @property BOOL dragPan;
+@property BOOL dragMoved;
+@property VKVector3 dragCamera;
 @property (strong) NSTimer *animationTimer;
 @property CFTimeInterval lastFrameTime;
 @property (nonatomic) VKVector3 gravity;
@@ -475,6 +480,10 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
 - (void)setVelocityForID:(NSString *)identifier velocity:(VKVector3)velocity;
 - (void)setFrameCallback:(NSArray *)callback variables:(NSMutableDictionary *)variables;
 - (void)stepFrame;
+- (void)addVoxel:(VKVector3)position color:(NSString *)color;
+- (void)editVoxelAtPoint:(NSPoint)point place:(BOOL)place;
+- (void)moveCameraForKey:(NSString *)key;
+- (void)removeObjectForID:(NSString *)identifier;
 @end
 
 @implementation VK3DView
@@ -485,11 +494,16 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
         _objects = [NSMutableArray array];
         _lights = [NSMutableArray array];
         _objectsByID = [NSMutableDictionary dictionary];
+        _voxelObjects = [NSMutableDictionary dictionary];
         _cameraDistance = 12;
         _cameraTarget = VKVectorMake(0, 0, 0);
         _lastFrameTime = CACurrentMediaTime();
         _rendererMode = [NSSegmentedControl segmentedControlWithLabels:@[@"Basic", @"Regular"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(changeRendererMode:)];
         _rendererMode.selectedSegment = 1;
+        _rendererMode.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+        _rendererMode.wantsLayer = YES;
+        _rendererMode.layer.backgroundColor = NSColor.whiteColor.CGColor;
+        _rendererMode.layer.cornerRadius = 4;
         _rendererMode.toolTip = @"Choose the 3D renderer";
         _rendererMode.frame = NSMakeRect(MAX(0, frame.size.width - 154), 6, 148, 24);
         _rendererMode.autoresizingMask = NSViewMinXMargin;
@@ -500,6 +514,85 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
 }
 - (BOOL)allowsCameraControl { return YES; }
 - (void)changeRendererMode:(id)sender { (void)sender; self.needsDisplay = YES; }
+- (VKVector3)cameraPosition {
+    return VKVectorAdd(self.cameraTarget, VKVectorMake(self.cameraDistance * cos(self.cameraPitch) * sin(self.cameraYaw), self.cameraDistance * sin(self.cameraPitch), self.cameraDistance * cos(self.cameraPitch) * cos(self.cameraYaw)));
+}
+- (NSString *)voxelKey:(VKVector3)position {
+    return [NSString stringWithFormat:@"%.0f,%.0f,%.0f", position.x, position.y, position.z];
+}
+- (void)addVoxel:(VKVector3)position color:(NSString *)color {
+    NSString *key = [self voxelKey:position];
+    if (self.voxelObjects[key]) return;
+    VK3DObject *object = [self addPrimitive:VKUIBox3D values:@[@(position.x), @(position.y), @(position.z), @1, @1, @1, color]];
+    self.voxelObjects[key] = object;
+}
+- (void)removeObjectForID:(NSString *)identifier {
+    VK3DObject *object = self.objectsByID[identifier];
+    if (!object) return;
+    [self.objects removeObjectIdenticalTo:object];
+    [self.objectsByID removeObjectForKey:identifier];
+    self.needsDisplay = YES;
+}
+- (void)moveCameraForKey:(NSString *)key {
+    if (self.voxelStep <= 0) return;
+    VKVector3 forward = VKVectorMake(-sin(self.cameraYaw), 0, -cos(self.cameraYaw));
+    VKVector3 right = VKVectorMake(cos(self.cameraYaw), 0, -sin(self.cameraYaw));
+    VKVector3 movement = VKVectorMake(0, 0, 0);
+    if ([key isEqualToString:@"w"]) movement = forward;
+    else if ([key isEqualToString:@"s"]) movement = VKVectorScale(forward, -1);
+    else if ([key isEqualToString:@"d"]) movement = right;
+    else if ([key isEqualToString:@"a"]) movement = VKVectorScale(right, -1);
+    else if ([key isEqualToString:@"e"] || [key isEqualToString:@"space"]) movement = VKVectorMake(0, 1, 0);
+    else if ([key isEqualToString:@"q"]) movement = VKVectorMake(0, -1, 0);
+    else return;
+    self.cameraTarget = VKVectorAdd(self.cameraTarget, VKVectorScale(movement, self.voxelStep));
+    self.needsDisplay = YES;
+}
+- (void)editVoxelAtPoint:(NSPoint)point place:(BOOL)place {
+    if (self.voxelStep <= 0 || !self.bounds.size.width || !self.bounds.size.height) return;
+    VKVector3 camera = [self cameraPosition];
+    VKVector3 forward = VKVectorNormalize(VKVectorSubtract(self.cameraTarget, camera));
+    VKVector3 right = VKVectorNormalize(VKVectorCross(forward, VKVectorMake(0, 1, 0)));
+    VKVector3 up = VKVectorCross(right, forward);
+    CGFloat focalLength = self.bounds.size.width * 0.5 / tan(M_PI / 8);
+    VKVector3 ray = VKVectorNormalize(VKVectorAdd(forward, VKVectorAdd(VKVectorScale(right, (point.x - self.bounds.size.width * 0.5) / focalLength), VKVectorScale(up, (self.bounds.size.height * 0.5 - point.y) / focalLength))));
+    VK3DObject *hit = nil;
+    VKVector3 hitNormal = VKVectorMake(0, 0, 0);
+    double closest = 12;
+    for (VK3DObject *object in self.voxelObjects.allValues) {
+        double origin[] = {camera.x, camera.y, camera.z}, direction[] = {ray.x, ray.y, ray.z};
+        double center[] = {object.position.x, object.position.y, object.position.z};
+        double nearDistance = -DBL_MAX, farDistance = DBL_MAX;
+        VKVector3 nearNormal = VKVectorMake(0, 0, 0), farNormal = VKVectorMake(0, 0, 0);
+        BOOL intersects = YES;
+        for (NSUInteger axis = 0; axis < 3; axis++) {
+            double minimum = center[axis] - 0.5, maximum = center[axis] + 0.5;
+            if (fabs(direction[axis]) < 1e-12) {
+                if (origin[axis] < minimum || origin[axis] > maximum) { intersects = NO; break; }
+                continue;
+            }
+            double first = (minimum - origin[axis]) / direction[axis], second = (maximum - origin[axis]) / direction[axis];
+            double firstSign = -1, secondSign = 1;
+            if (first > second) { double swap = first; first = second; second = swap; firstSign = 1; secondSign = -1; }
+            VKVector3 firstNormal = VKVectorMake(axis == 0 ? firstSign : 0, axis == 1 ? firstSign : 0, axis == 2 ? firstSign : 0);
+            VKVector3 secondNormal = VKVectorMake(axis == 0 ? secondSign : 0, axis == 1 ? secondSign : 0, axis == 2 ? secondSign : 0);
+            if (first > nearDistance) { nearDistance = first; nearNormal = firstNormal; }
+            if (second < farDistance) { farDistance = second; farNormal = secondNormal; }
+            if (nearDistance > farDistance) { intersects = NO; break; }
+        }
+        double distance = nearDistance >= 0 ? nearDistance : farDistance;
+        if (intersects && distance >= 0 && distance < closest) {
+            closest = distance; hit = object; hitNormal = nearDistance >= 0 ? nearNormal : farNormal;
+        }
+    }
+    if (!hit) return;
+    if (place) [self addVoxel:VKVectorAdd(hit.position, hitNormal) color:self.voxelColor];
+    else {
+        [self.voxelObjects removeObjectForKey:[self voxelKey:hit.position]];
+        [self.objects removeObjectIdenticalTo:hit];
+        self.needsDisplay = YES;
+    }
+}
 - (void)setCameraPosition:(VKVector3)position {
     VKVector3 offset = VKVectorSubtract(position, self.cameraTarget);
     self.cameraDistance = MAX(0.5, VKVectorLength(offset));
@@ -603,7 +696,10 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     self.lastFrameTime = now;
     CGFloat maximumSpeed = 0;
     CGFloat minimumRadius = 10000;
+    NSMutableArray<VK3DObject *> *physicsObjects = [NSMutableArray array];
     for (VK3DObject *object in self.objects) {
+        if (!object.physicsEnabled) continue;
+        [physicsObjects addObject:object];
         maximumSpeed = MAX(maximumSpeed, VKVectorLength(object.velocity));
         if (object.boundingRadius > 0) minimumRadius = MIN(minimumRadius, object.boundingRadius);
     }
@@ -613,14 +709,13 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     NSString *collisionA = @"", *collisionB = @"";
     NSUInteger collisionCount = 0;
     for (NSUInteger substep = 0; substep < substeps; substep++) {
-        for (VK3DObject *object in self.objects) {
-            if (!object.physicsEnabled || object.mass <= 0) continue;
+        for (VK3DObject *object in physicsObjects) {
+            if (object.mass <= 0) continue;
             object.velocity = VKVectorAdd(object.velocity, VKVectorScale(self.gravity, step));
             object.position = VKVectorAdd(object.position, VKVectorScale(object.velocity, step));
         }
-        for (NSUInteger firstIndex = 0; firstIndex < self.objects.count; firstIndex++) for (NSUInteger secondIndex = firstIndex + 1; secondIndex < self.objects.count; secondIndex++) {
-            VK3DObject *first = self.objects[firstIndex], *second = self.objects[secondIndex];
-            if (!first.physicsEnabled || !second.physicsEnabled) continue;
+        for (NSUInteger firstIndex = 0; firstIndex < physicsObjects.count; firstIndex++) for (NSUInteger secondIndex = firstIndex + 1; secondIndex < physicsObjects.count; secondIndex++) {
+            VK3DObject *first = physicsObjects[firstIndex], *second = physicsObjects[secondIndex];
             VKVector3 delta = VKVectorSubtract(second.position, first.position);
             CGFloat distance = VKVectorLength(delta), penetration = first.boundingRadius + second.boundingRadius - distance;
             if (penetration <= 0) continue;
@@ -654,6 +749,7 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
         else for (NSArray *action in actions) {
             VKOpcode opcode = [action[0] unsignedCharValue];
             NSArray *values = action[1];
+            if (opcode == VKUIRemove3D) { [self removeObjectForID:values[0]]; continue; }
             VK3DObject *object = self.objectsByID[values[0]];
             if (!object) continue;
             VKVector3 vector = VKVectorMake([values[1] doubleValue], [values[2] doubleValue], [values[3] doubleValue]);
@@ -671,11 +767,14 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     self.dragPitch = self.cameraPitch;
     self.dragTarget = self.cameraTarget;
     self.dragPan = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+    self.dragMoved = NO;
+    self.dragCamera = [self cameraPosition];
 }
 - (void)mouseDragged:(NSEvent *)event {
     NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     CGFloat dx = point.x - self.dragStart.x, dy = point.y - self.dragStart.y;
-    if (self.dragPan) {
+    if (hypot(dx, dy) > 3) self.dragMoved = YES;
+    if (self.dragPan && self.voxelStep <= 0) {
         VKVector3 right = VKVectorMake(cos(self.cameraYaw), 0, -sin(self.cameraYaw));
         VKVector3 up = VKVectorMake(-sin(self.cameraYaw) * sin(self.cameraPitch), cos(self.cameraPitch), -cos(self.cameraYaw) * sin(self.cameraPitch));
         CGFloat unitsPerPoint = self.cameraDistance / MAX(1, self.bounds.size.height) * 1.6;
@@ -683,8 +782,19 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     } else {
         self.cameraYaw = self.dragYaw - dx * 0.008;
         self.cameraPitch = MAX(-1.45, MIN(1.45, self.dragPitch + dy * 0.008));
+        if (self.voxelStep > 0) {
+            VKVector3 offset = VKVectorMake(self.cameraDistance * cos(self.cameraPitch) * sin(self.cameraYaw), self.cameraDistance * sin(self.cameraPitch), self.cameraDistance * cos(self.cameraPitch) * cos(self.cameraYaw));
+            self.cameraTarget = VKVectorSubtract(self.dragCamera, offset);
+        }
     }
     self.needsDisplay = YES;
+}
+- (void)mouseUp:(NSEvent *)event {
+    if (self.voxelStep > 0 && !self.dragMoved) [self editVoxelAtPoint:[self convertPoint:event.locationInWindow fromView:nil] place:NO];
+}
+- (void)rightMouseDown:(NSEvent *)event {
+    if (self.voxelStep > 0) [self editVoxelAtPoint:[self convertPoint:event.locationInWindow fromView:nil] place:YES];
+    else [super rightMouseDown:event];
 }
 - (void)scrollWheel:(NSEvent *)event {
     self.cameraDistance = MAX(0.5, MIN(5000, self.cameraDistance * exp(event.scrollingDeltaY * 0.01)));
@@ -774,7 +884,13 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     free(depthRows);
     unsigned char *planes[5] = {pixels, NULL, NULL, NULL, NULL};
     NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:planes pixelsWide:(NSInteger)pixelWidth pixelsHigh:(NSInteger)pixelHeight bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:(NSInteger)pixelWidth * 4 bitsPerPixel:32];
+    [NSGraphicsContext saveGraphicsState];
+    NSAffineTransform *flip = [NSAffineTransform transform];
+    [flip translateXBy:0 yBy:NSHeight(self.bounds)];
+    [flip scaleXBy:1 yBy:-1];
+    [flip concat];
     [bitmap drawInRect:self.bounds];
+    [NSGraphicsContext restoreGraphicsState];
 }
 @end
 
@@ -1066,13 +1182,15 @@ static BOOL testInstrumentRendering(NSString *instrument) {
 
 @interface VKProgramWindow : NSWindow
 @property (copy) void (^focusedKeyHandler)(NSString *key);
+@property (copy) void (^focusedRepeatKeyHandler)(NSString *key);
 @property (copy) NSArray<NSString *> *registeredKeys;
 @end
 @implementation VKProgramWindow
 - (void)sendEvent:(NSEvent *)event {
-    if (event.type == NSEventTypeKeyDown && !event.isARepeat && self.isKeyWindow && self.focusedKeyHandler) {
+    if (event.type == NSEventTypeKeyDown && self.isKeyWindow) {
         NSString *key = programKeyForEvent(event);
-        if (key.length) self.focusedKeyHandler(key);
+        if (key.length && self.focusedRepeatKeyHandler) self.focusedRepeatKeyHandler(key);
+        if (key.length && !event.isARepeat && self.focusedKeyHandler) self.focusedKeyHandler(key);
     }
     [super sendEvent:event];
 }
@@ -1196,7 +1314,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.3.1";
+    self.window.title = @"Vektkove 1.3.2";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1355,7 +1473,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.3.1",
+        NSAboutPanelOptionApplicationVersion: @"1.3.2",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -1877,8 +1995,8 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     for (NSUInteger index = 1; index < ui.count; index++) {
         VKOpcode opcode = [ui[index][0] unsignedCharValue];
         NSArray *values = ui[index][1];
-        if (opcode == VKUIShortcut || opcode == VKUIKeynote || opcode == VKUIKeyMove2D) {
-            NSString *key = values[opcode == VKUIKeyMove2D ? 1 : 0];
+        if (opcode == VKUIShortcut || opcode == VKUIKeynote || opcode == VKUIKeyMove2D || opcode == VKUIKeyMove3D) {
+            NSString *key = values[(opcode == VKUIKeyMove2D || opcode == VKUIKeyMove3D) ? 1 : 0];
             keyActions[[key lowercaseString]] = @[@(opcode), values];
             continue;
         }
@@ -1973,6 +2091,25 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
         }
         if (opcode == VKUIVelocity3D) {
             [sceneView setVelocityForID:values[0] velocity:VKVectorMake([values[1] doubleValue], [values[2] doubleValue], [values[3] doubleValue])];
+            lastSceneObject = nil;
+            lastControl = nil;
+            continue;
+        }
+        if (opcode == VKUIVoxel3D) {
+            [sceneView addVoxel:VKVectorMake([values[0] doubleValue], [values[1] doubleValue], [values[2] doubleValue]) color:values[3]];
+            lastSceneObject = nil;
+            lastControl = nil;
+            continue;
+        }
+        if (opcode == VKUIVoxelControls3D) {
+            sceneView.voxelStep = [values[0] doubleValue];
+            sceneView.voxelColor = values[1];
+            lastSceneObject = nil;
+            lastControl = nil;
+            continue;
+        }
+        if (opcode == VKUIRemove3D) {
+            [sceneView removeObjectForID:values[0]];
             lastSceneObject = nil;
             lastControl = nil;
             continue;
@@ -2092,6 +2229,8 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     }
     __weak VKApp *weakSelf = self;
     __weak VKProgramWindow *weakWindow = window;
+    __weak VK3DView *weakSceneView = sceneView;
+    window.focusedRepeatKeyHandler = ^(NSString *key) { [weakSceneView moveCameraForKey:key]; };
     window.registeredKeys = keyActions.allKeys;
     window.focusedKeyHandler = ^(NSString *key) {
         NSArray *action = keyActions[key];
@@ -2099,6 +2238,11 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
         VKApp *strongSelf = weakSelf;
         NSArray *values = action[1];
         if ([action[0] unsignedCharValue] == VKUIKeyMove2D) [scene2DView moveObject:values[0] x:[values[2] doubleValue] y:[values[3] doubleValue]];
+        else if ([action[0] unsignedCharValue] == VKUIKeyMove3D) {
+            VK3DObject *object = sceneView.objectsByID[values[0]];
+            if (object) object.position = VKVectorAdd(object.position, VKVectorMake([values[2] doubleValue], [values[3] doubleValue], [values[4] doubleValue]));
+            sceneView.needsDisplay = YES;
+        }
         else if ([action[0] unsignedCharValue] == VKUIKeynote) [strongSelf playInstrument:values[1] note:[values[2] unsignedCharValue] duration:[values[3] doubleValue]];
         else {
             NSAlert *alert = [[NSAlert alloc] init];
@@ -3079,7 +3223,7 @@ int main(int argc, const char *argv[]) {
             boundInput.stringValue = @"Ada";
             [delegate controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification object:boundInput]];
             if (![boundLabel.stringValue isEqualToString:@"Ada"] || ![boundInput.boundValues[@"username"] isEqualToString:@"Ada"]) return 72;
-            NSString *sceneSource = @"import ui\nwindow \"Scene\" 640 480\nui_scene3d 20 20 600 440\nui_camera3d 0 0 12\nui_light3d 4 6 8 900\nui_box3d 0 0 0 2 2 2 \"#FF5533\"\nui_id \"hero\"\nui_spin3d \"hero\" 3\nui_sphere3d 3 0 0 1 \"#33AAFF\"";
+            NSString *sceneSource = @"import ui\nwindow \"Scene\" 640 480\nui_scene3d 20 20 600 440\nui_camera3d 0 0 12\nui_light3d 4 6 8 900\nui_box3d 0 0 0 2 2 2 \"#FF5533\"\nui_id \"hero\"\nui_spin3d \"hero\" 3\nui_keymove3d \"hero\" \"w\" 1 0 0\nui_sphere3d 3 0 0 1 \"#33AAFF\"";
             NSMutableArray *sceneUI = [NSMutableArray array];
             NSData *sceneCode = [VKEngine compile:sceneSource error:&error];
             if (!sceneCode || ![VKEngine run:sceneCode ui:sceneUI error:&error]) return 73;
@@ -3088,6 +3232,10 @@ int main(int argc, const char *argv[]) {
             for (NSView *subview in delegate.previewWindows.lastObject.contentView.subviews) if ([subview isKindOfClass:VK3DView.class]) renderView = (VK3DView *)subview;
             VK3DObject *hero = renderView.objectsByID[@"hero"];
             if (!renderView || !renderView.allowsCameraControl || renderView.objects.count != 2 || !hero || hero.triangles.count != 12 || hero.spinPeriod != 3 || renderView.lights.count != 2) return 74;
+            VKProgramWindow *renderWindow = (VKProgramWindow *)delegate.previewWindows.lastObject;
+            renderWindow.focusedKeyHandler(@"w");
+            if (hero.position.x != 1) return 116;
+            hero.position = VKVectorMake(0, 0, 0);
             for (NSInteger mode = 0; mode < 2; mode++) {
                 renderView.rendererMode.selectedSegment = mode;
                 [renderView changeRendererMode:nil];
@@ -3102,6 +3250,47 @@ int main(int argc, const char *argv[]) {
                     if (rgb && (rgb.redComponent > 0.15 || rgb.greenComponent > 0.15 || rgb.blueComponent > 0.15)) { hasLitPixel = YES; break; }
                 }
                 if (!hasLitPixel) return 77;
+            }
+            NSString *voxelSource = @"import ui\nwindow \"Voxel\" 320 240\nui_scene3d 0 0 320 240\nui_camera3d 0 0 4\nui_voxel3d 0 0 0 \"#55AA55\"\nui_voxel_controls3d 0.5 \"#AA8855\"\nui_box3d 3 0 0 1 1 1 \"#FF0000\"\nui_id \"mob\"\nui_frame3d\nui_remove3d \"mob\"\nui_end_frame3d";
+            NSMutableArray *voxelUI = [NSMutableArray array];
+            NSData *voxelCode = [VKEngine compile:voxelSource error:&error];
+            if (!voxelCode || ![VKEngine run:voxelCode ui:voxelUI error:&error]) { NSLog(@"Voxel source: %@", error); return 117; }
+            [delegate showUI:voxelUI];
+            VKProgramWindow *voxelWindow = (VKProgramWindow *)delegate.previewWindows.lastObject;
+            VK3DView *voxelView = nil;
+            for (NSView *subview in voxelWindow.contentView.subviews) if ([subview isKindOfClass:VK3DView.class]) voxelView = (VK3DView *)subview;
+            if (!voxelView || voxelView.voxelObjects.count != 1 || !voxelView.objectsByID[@"mob"]) return 118;
+            VKVector3 cameraBeforeMove = [voxelView cameraPosition];
+            voxelWindow.focusedRepeatKeyHandler(@"w");
+            if (fabs([voxelView cameraPosition].z - (cameraBeforeMove.z - 0.5)) > 1e-6) return 119;
+            NSPoint center = NSMakePoint(NSMidX(voxelView.bounds), NSMidY(voxelView.bounds));
+            NSPoint windowCenter = [voxelView convertPoint:center toView:nil];
+            NSEvent *rightClick = [NSEvent mouseEventWithType:NSEventTypeRightMouseDown location:windowCenter modifierFlags:0 timestamp:0 windowNumber:voxelWindow.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];
+            [voxelView rightMouseDown:rightClick];
+            if (voxelView.voxelObjects.count != 2 || !voxelView.voxelObjects[@"0,0,1"]) return 120;
+            NSEvent *leftDown = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:windowCenter modifierFlags:0 timestamp:0 windowNumber:voxelWindow.windowNumber context:nil eventNumber:2 clickCount:1 pressure:1];
+            NSEvent *leftUp = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:windowCenter modifierFlags:0 timestamp:0 windowNumber:voxelWindow.windowNumber context:nil eventNumber:2 clickCount:1 pressure:0];
+            [voxelView mouseDown:leftDown]; [voxelView mouseUp:leftUp];
+            if (voxelView.voxelObjects.count != 1 || voxelView.voxelObjects[@"0,0,1"]) return 121;
+            [voxelView mouseDown:leftDown]; [voxelView mouseUp:leftUp];
+            if (voxelView.voxelObjects.count != 0) return 122;
+            [voxelView stepFrame];
+            if (voxelView.objectsByID[@"mob"]) return 123;
+            NSString *voxelSnapshot = NSProcessInfo.processInfo.environment[@"VEKTKOVE_TEST_VOXEL_SNAPSHOT"];
+            if (voxelSnapshot.length) {
+                NSString *example = [NSString stringWithContentsOfFile:@"examples/voxel3d.vk" encoding:NSUTF8StringEncoding error:nil];
+                NSData *exampleCode = example ? [VKEngine compile:example error:&error] : nil;
+                NSMutableArray *exampleUI = [NSMutableArray array];
+                if (!exampleCode || ![VKEngine run:exampleCode ui:exampleUI error:&error]) return 124;
+                [delegate showUI:exampleUI];
+                VK3DView *exampleView = nil;
+                for (NSView *subview in delegate.previewWindows.lastObject.contentView.subviews) if ([subview isKindOfClass:VK3DView.class]) exampleView = (VK3DView *)subview;
+                if (!exampleView) return 125;
+                [exampleView displayIfNeeded];
+                NSBitmapImageRep *bitmap = [exampleView bitmapImageRepForCachingDisplayInRect:exampleView.bounds];
+                if (!bitmap) return 126;
+                [exampleView cacheDisplayInRect:exampleView.bounds toBitmapImageRep:bitmap];
+                if (![[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:voxelSnapshot atomically:YES]) return 127;
             }
             NSMutableArray *actions = [NSMutableArray array];
             NSData *actionCode = [VKEngine compile:@"import ui\nwindow \"Actions\" 400 300\nui_keyboard \"guitar\" 60\nui_shortcut \"F1\" \"Help\"\nui_label \"Spin\" 10 10 100 30\nauto_turn 2" error:&error];

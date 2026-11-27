@@ -1,0 +1,44 @@
+import ui
+window "Voxel World" 900 650
+ui_scene3d 0 0 900 650
+ui_camera3d 0 3 8
+ui_light3d 3 8 8 1400
+ui_voxel_controls3d 0.3 "#B38B62"
+ui_voxel3d -2 -1 -2 "#4E9A60"
+ui_voxel3d -1 -1 -2 "#67AE71"
+ui_voxel3d 0 -1 -2 "#4E9A60"
+ui_voxel3d 1 -1 -2 "#67AE71"
+ui_voxel3d 2 -1 -2 "#4E9A60"
+ui_voxel3d -2 -1 -1 "#67AE71"
+ui_voxel3d -1 -1 -1 "#4E9A60"
+ui_voxel3d 0 -1 -1 "#67AE71"
+ui_voxel3d 1 -1 -1 "#4E9A60"
+ui_voxel3d 2 -1 -1 "#67AE71"
+ui_voxel3d -2 -1 0 "#4E9A60"
+ui_voxel3d -1 -1 0 "#67AE71"
+ui_voxel3d 0 -1 0 "#4E9A60"
+ui_voxel3d 1 -1 0 "#67AE71"
+ui_voxel3d 2 -1 0 "#4E9A60"
+ui_voxel3d -2 -1 1 "#67AE71"
+ui_voxel3d -1 -1 1 "#4E9A60"
+ui_voxel3d 0 -1 1 "#67AE71"
+ui_voxel3d 1 -1 1 "#4E9A60"
+ui_voxel3d 2 -1 1 "#67AE71"
+ui_voxel3d -2 -1 2 "#4E9A60"
+ui_voxel3d -1 -1 2 "#67AE71"
+ui_voxel3d 0 -1 2 "#4E9A60"
+ui_voxel3d 1 -1 2 "#67AE71"
+ui_voxel3d 2 -1 2 "#4E9A60"
+ui_voxel3d -2 0 -2 "#B38B62"
+ui_voxel3d -2 1 -2 "#B38B62"
+ui_voxel3d 2 0 -2 "#778994"
+ui_voxel3d 2 1 -2 "#778994"
+ui_box3d 0 1 -2 0.8 1.2 0.8 "#E6A54A"
+ui_id "mob"
+ui_spin3d "mob" 5
+ui_keymove3d "mob" "i" 0 0 -0.5
+ui_keymove3d "mob" "k" 0 0 0.5
+ui_box3d 0 4 -4 3 0.4 1 "#E7EDF2"
+ui_id "cloud"
+ui_spin3d "cloud" 18
+halt

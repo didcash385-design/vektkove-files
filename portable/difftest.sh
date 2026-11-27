@@ -67,6 +67,10 @@ done
 check "$large_ui" success
 check "$large_3d" success
 check "$large_2d" success
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "cube"\nui_keymove3d "cube" "w" 0 0 -1' success
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_keymove3d "missing" "w" 0 0 -1'
+check 'import ui\nwindow "World" 100 100\nui_scene3d 0 0 100 100\nui_voxel3d 0 0 0 "#44AA55"\nui_voxel_controls3d 0.5 "#FFFFFF"\nui_box3d 0 2 0 1 1 1 "#FF0000"\nui_id "mob"\nui_frame3d\nui_remove3d "mob"\nui_end_frame3d' success
+check 'import ui\nwindow "World" 100 100\nui_scene3d 0 0 100 100\nui_voxel3d 0.5 0 0 "#44AA55"'
 check 'text s "Hello"\nencode s "base64"\nout $s\ndecode s "base64"\nout $s'
 check 'text s "Hello"\nencode s "zstd+base64"\ndecode s "base64+zstd"\nout $s'
 check 'text s "!!!"\ndecode s "base64"'
