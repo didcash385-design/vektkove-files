@@ -6,7 +6,7 @@ Vektkove is a custom, deterministic programming language and native Mac editor. 
 
 ## Versioned Files
 
-The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.3.0. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
+The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.3.0. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
 ## Start
 
