@@ -1,0 +1,30 @@
+name: macOS renderer release tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-15-intel, arch: x64}
+          - {runner: macos-15, arch: arm64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Run renderer self-test
+        shell: bash
+        run: |
+          set -eu
+          archive="$RUNNER_TEMP/vektkove.tar.gz"
+          package="$RUNNER_TEMP/vektkove"
+          mkdir -p "$package"
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v1.2.0/vektkove-1.2.0-macos-${{ matrix.arch }}.tar.gz" -o "$archive"
+          tar -xzf "$archive" -C "$package"
+          "$package/Vektkove.app/Contents/MacOS/Vektkove" --self-test
+          "$package/VektkoveLauncher.app/Contents/MacOS/VektkoveLauncher" --self-test
+          cmp "$package/Vektkove.app/Contents/Resources/Mini3D-LICENSE.txt" "$package/VektkoveLauncher.app/Contents/Resources/Mini3D-LICENSE.txt"
