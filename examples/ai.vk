@@ -1,0 +1,6 @@
+ai_config "ollama" "llama3.2"
+train "topic" "solar power"
+train "text" "My project uses solar panels."
+ai_ask answer "How do solar panels work?"
+out $answer
+halt

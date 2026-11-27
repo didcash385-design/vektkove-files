@@ -1,11 +1,27 @@
 #import "VKEngine.h"
 #include "portable/vkcodec.h"
+#include "portable/vkai.h"
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 static const NSUInteger VKNetworkMaxMessage = 16 * 1024;
+
+@interface VKAIState : NSObject {
+@public
+    VKAIContext context;
+}
+@end
+
+@implementation VKAIState
+- (instancetype)init {
+    self = [super init];
+    if (self) vk_ai_init(&context);
+    return self;
+}
+- (void)dealloc { vk_ai_destroy(&context); }
+@end
 
 @interface VKTCPChannel : NSObject
 @property int descriptor;
@@ -254,7 +270,11 @@ static NSDictionary *commandTable(void) {
             @[@(VKUIMesh3D), @6, @"ui_mesh3d"],
             @[@(VKEncode), @2, @"encode encode_text text_encode"],
             @[@(VKDecode), @2, @"decode decode_text text_decode"],
-            @[@(VKCodecList), @0, @"codec_list list_codecs codecs"]
+            @[@(VKCodecList), @0, @"codec_list list_codecs codecs"],
+            @[@(VKAIConfigure), @2, @"ai_config ai_configure"],
+            @[@(VKTrain), @2, @"train ai_train"],
+            @[@(VKAIClear), @0, @"ai_clear clear_knowledge"],
+            @[@(VKAIAsk), @2, @"ai_ask ask_ai"]
         ];
         NSMutableDictionary *table = [NSMutableDictionary dictionary];
         for (NSArray *definition in definitions) {
@@ -468,7 +488,11 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             @(VKUIMesh3D): @"path x y z scale color - Import a local 3D mesh.",
             @(VKEncode): @"name format - Encode the variable's text. Formats include base64, hex, base58, url, json, and chains such as zstd+base64.",
             @(VKDecode): @"name format - Decode the variable's text from base64, hex, base64+gzip, base64+zstd, and other formats; the result must be UTF-8 text.",
-            @(VKCodecList): @"- List every supported encoding and compression format."
+            @(VKCodecList): @"- List every supported encoding and compression format.",
+            @(VKAIConfigure): @"backend model - Select the ollama or openai backend and model.",
+            @(VKTrain): @"source value - Add knowledge from text, file, HTTPS URL, or a Wikipedia topic.",
+            @(VKAIClear): @"- Clear the current program's AI knowledge.",
+            @(VKAIAsk): @"name question - Ask the configured AI and store its answer in name."
         };
     });
     return descriptions[command[0]];
@@ -502,6 +526,16 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             return @"Text";
         default: return @"Code";
     }
+}
+
++ (NSInteger)dimensionForKeyword:(NSString *)keyword {
+    NSArray *command = commandForKeyword(keyword.lowercaseString);
+    if (!command) return 0;
+    VKOpcode opcode = [command[0] unsignedCharValue];
+    if (opcodeIs2DGameInstruction(opcode)) return 2;
+    if ((opcode >= VKUIScene3D && opcode <= VKUISpin3D) || opcodeIs3DGameInstruction(opcode)) return 3;
+    if (opcode == VKImport || opcode == VKWindow || opcode == VKUIID || opcode == VKUIBind) return -1;
+    return 0;
 }
 
 + (NSData *)compile:(NSString *)source error:(NSString **)error {
@@ -552,6 +586,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         (opcode >= VKWindow && opcode <= VKUIInput) || (opcode >= VKUIColor && opcode <= VKUIAutoTurn) ||
         opcode == VKImport || opcode == VKUIID || opcode == VKUIBind || (opcode >= VKUIScene3D && opcode <= VKUISpin3D) || opcodeIs2DGameInstruction(opcode) ||
         opcode == VKTerminalRun || opcode == VKTerminalEcho || opcode == VKTerminalKeywords || opcode == VKCite || opcode == VKCodecList ||
+        opcode == VKAIConfigure || opcode == VKTrain || opcode == VKAIClear ||
         opcode == VKServerScript || opcode == VKLocalScript || (opcode >= VKNetListen && opcode <= VKNetBroadcast) ||
         opcode == VKUIGravity2D || opcode == VKUIFrame2D || opcode == VKUIEndFrame2D ||
         opcode == VKUIPhysics2D || opcode == VKUIMove2D || opcode == VKUIForce2D || opcode == VKUISetVelocity2D ||
@@ -660,8 +695,8 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         BOOL noName = opcodeHasNoName(opcode);
         if (!noName) {
             NSString *name = tokens[1];
-            if ((opcode == VKText || opcode == VKSet) && !definitions[name]) definitions[name] = @(number);
-            if (opcode != VKText && opcode != VKSet) [reads addObject:name];
+            if ((opcode == VKText || opcode == VKSet || opcode == VKAIAsk) && !definitions[name]) definitions[name] = @(number);
+            if (opcode != VKText && opcode != VKSet && opcode != VKAIAsk) [reads addObject:name];
         }
         for (NSUInteger operand = noName ? 1 : 2; operand < tokens.count; operand++) {
             if ([tokens[operand] hasPrefix:@"$"]) [reads addObject:[tokens[operand] substringFromIndex:1]];
@@ -707,7 +742,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         BOOL noName = opcodeHasNoName(opcode);
         if (opcode == VKUIBind && !definitions[tokens[2]])
             [result addObject:[NSString stringWithFormat:@"Error %@: Variable $%@ is used but never defined with text or set.", position, tokens[2]]];
-        if (!noName && opcode != VKText && opcode != VKSet && !definitions[tokens[1]])
+        if (!noName && opcode != VKText && opcode != VKSet && opcode != VKAIAsk && !definitions[tokens[1]])
             [result addObject:[NSString stringWithFormat:@"Error %@: Variable $%@ is used but never defined with text or set.", position, tokens[1]]];
         for (NSUInteger operand = noName ? 1 : 2; operand < tokens.count; operand++) {
             NSString *variable = [tokens[operand] hasPrefix:@"$"] ? [tokens[operand] substringFromIndex:1] : nil;
@@ -756,6 +791,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         [instructions addObject:@[@(opcode), operands]];
     }
     NSMutableDictionary *variables = [NSMutableDictionary dictionary];
+    VKAIState *aiState = [[VKAIState alloc] init];
     NSMutableSet<NSString *> *uiIDs = [NSMutableSet set];
     NSMutableDictionary<NSString *, NSNumber *> *uiIDTypes = [NSMutableDictionary dictionary];
     NSMutableString *output = [NSMutableString string];
@@ -1306,6 +1342,25 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             if (output.length > 100000) { if (error) *error = @"Output limit exceeded."; return nil; }
             continue;
         }
+        if (opcode == VKAIClear) {
+            vk_ai_clear(&aiState->context);
+            continue;
+        }
+        if (opcode == VKAIConfigure || opcode == VKTrain) {
+            id first = valueOf(operands[0], variables, &runtimeError);
+            id second = valueOf(operands[1], variables, &runtimeError);
+            if (runtimeError) { if (error) *error = runtimeError; return nil; }
+            if (![first isKindOfClass:NSString.class] || ![second isKindOfClass:NSString.class]) {
+                if (error) *error = @"AI command operands must be text.";
+                return nil;
+            }
+            char message[1024] = {0};
+            int ok = opcode == VKAIConfigure
+                ? vk_ai_configure(&aiState->context, [first UTF8String], [second UTF8String], message, sizeof(message))
+                : vk_ai_train(&aiState->context, [first UTF8String], [second UTF8String], message, sizeof(message));
+            if (!ok) { if (error) *error = [NSString stringWithUTF8String:message]; return nil; }
+            continue;
+        }
         NSString *name = operands[0];
         NSCharacterSet *invalidName = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"] invertedSet];
         if (!name.length || [name rangeOfCharacterFromSet:invalidName].location != NSNotFound || [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[name characterAtIndex:0]]) { if (error) *error = @"Invalid variable name."; return nil; }
@@ -1314,6 +1369,17 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         if (runtimeError) { if (error) *error = runtimeError; return nil; }
         if (opcode == VKText) { variables[name] = [value description]; continue; }
         if (opcode == VKSet) { variables[name] = value; continue; }
+        if (opcode == VKAIAsk) {
+            if (![value isKindOfClass:NSString.class]) { if (error) *error = @"ai_ask requires a text question."; return nil; }
+            char message[1024] = {0};
+            char *answer = vk_ai_ask(&aiState->context, [value UTF8String], message, sizeof(message));
+            if (!answer) { if (error) *error = [NSString stringWithUTF8String:message]; return nil; }
+            NSString *text = [NSString stringWithUTF8String:answer];
+            free(answer);
+            if (!text) { if (error) *error = @"AI returned invalid UTF-8 text."; return nil; }
+            variables[name] = text;
+            continue;
+        }
         if (!original) { if (error) *error = [NSString stringWithFormat:@"Unknown variable $%@.", name]; return nil; }
         if (opcode == VKIsNumber) { variables[name] = @([original isKindOfClass:[NSNumber class]]); continue; }
         if (opcode == VKIsText) { variables[name] = @([original isKindOfClass:[NSString class]]); continue; }

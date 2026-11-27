@@ -1,0 +1,50 @@
+name: Pre-release platform tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - {runner: windows-2025, os: windows, arch: x64, extension: zip}
+          - {runner: windows-11-arm, os: windows, arch: arm64, extension: zip}
+          - {runner: ubuntu-24.04, os: linux, arch: x64, extension: tar.gz}
+          - {runner: ubuntu-24.04-arm, os: linux, arch: arm64, extension: tar.gz}
+          - {runner: macos-15-intel, os: macos, arch: x64, extension: tar.gz}
+          - {runner: macos-15, os: macos, arch: arm64, extension: tar.gz}
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test packaged runtime and AI commands
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $os = '${{ matrix.platform.os }}'
+          $arch = '${{ matrix.platform.arch }}'
+          $archive = Join-Path $PWD "platforms/$os/$arch/1.3.1/vektkove-1.3.1-$os-$arch.${{ matrix.platform.extension }}"
+          $package = Join-Path $env:RUNNER_TEMP 'vektkove-package'
+          New-Item -ItemType Directory -Path $package -Force | Out-Null
+          if ($os -eq 'windows') { Expand-Archive $archive -DestinationPath $package -Force; $command = Join-Path $package 'vk.exe' }
+          else { tar -xzf $archive -C $package; if ($LASTEXITCODE -ne 0) { throw 'Archive extraction failed' }; $command = Join-Path $package 'vk' }
+          $version = & $command --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne 'Vektkove 1.3.1') { throw "Incorrect version: $version" }
+          if ((Get-Content (Join-Path $package 'MANUAL.md') -TotalCount 1) -ne '# Vektkove 1.3.1 Manual') { throw 'Incorrect manual' }
+          if (-not (Test-Path (Join-Path $package 'LICENSE.cJSON.txt'))) { throw 'Missing cJSON license' }
+          $output = & $command run (Join-Path $package 'examples/hello.vk')
+          if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -ne "Hello from Vektkove`n5") { throw 'Example execution failed' }
+          & $command run (Join-Path $package 'examples/code3d.vk')
+          if ($LASTEXITCODE -ne 0) { throw '3D source validation failed' }
+          node portable/ai_integration_test.mjs - $command
+          if ($LASTEXITCODE -ne 0) { throw 'AI integration failed' }
+          if ($os -eq 'macos') {
+            & (Join-Path $package 'Vektkove.app/Contents/MacOS/Vektkove') --self-test
+            if ($LASTEXITCODE -ne 0) { throw 'Editor and renderer self-test failed' }
+            & (Join-Path $package 'VektkoveLauncher.app/Contents/MacOS/VektkoveLauncher') --self-test
+            if ($LASTEXITCODE -ne 0) { throw 'Launcher self-test failed' }
+          }

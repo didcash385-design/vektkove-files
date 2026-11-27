@@ -63,6 +63,9 @@ int main(void) {
         if ([VKEngine compile:@"window \"Late import\" 400 300\nimport ui" error:&error] || ![error containsString:@"must come before"]) return 46;
         if ([VKEngine run:[@"bad" dataUsingEncoding:NSUTF8StringEncoding] error:&error] != nil) return 3;
         if ([VKEngine keywordCount] != [VKEngine baseKeywordCount]) return 4;
+        if ([VKEngine dimensionForKeyword:@"ui_scene2d"] != 2 || [VKEngine dimensionForKeyword:@"op_game_rect"] != 2 ||
+            [VKEngine dimensionForKeyword:@"ui_scene3d"] != 3 || [VKEngine dimensionForKeyword:@"vk_box3d"] != 3 ||
+            [VKEngine dimensionForKeyword:@"ui_id"] != -1 || [VKEngine dimensionForKeyword:@"add"] != 0) return 74;
         if ([VKEngine compile:@"add_0 n" error:nil] || [VKEngine compile:@"add_99999 n" error:nil] || [VKEngine compile:@"plus n 1" error:nil] || [VKEngine compile:@"vk_add n 1" error:nil]) return 24;
         if (!expect(@"set total 1e300\nadd total 1e300\nout $total", @"2e+300\n")) return 25;
         for (NSUInteger keywordIndex = 0; keywordIndex < [VKEngine baseKeywordCount]; keywordIndex++) {

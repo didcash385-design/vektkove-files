@@ -20,7 +20,8 @@ typedef NS_ENUM(uint8_t, VKOpcode) {
 	VKUISetVelocity2D, VKUIFrameData,
 	VKUIPhysics3D, VKUIGravity3D, VKUIFrame3D, VKUIEndFrame3D, VKUIMove3D, VKUIForce3D, VKUISetVelocity3D, VKUIVelocity3D,
 VKUIMesh3D,
-        VKEncode, VKDecode, VKCodecList
+		VKEncode, VKDecode, VKCodecList,
+		VKAIConfigure, VKTrain, VKAIClear, VKAIAsk
 };
 
 @interface VKEngine : NSObject
@@ -34,5 +35,6 @@ VKUIMesh3D,
 + (NSString *)keywordAtIndex:(NSUInteger)index;
 + (NSString *)helpForKeyword:(NSString *)keyword;
 + (NSString *)categoryForKeyword:(NSString *)keyword;
++ (NSInteger)dimensionForKeyword:(NSString *)keyword;
 + (NSArray *)runFrameCallback:(NSArray *)instructions variables:(NSMutableDictionary *)variables error:(NSString **)error;
 @end

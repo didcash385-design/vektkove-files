@@ -1,0 +1,71 @@
+name: Pre-release Windows installer tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build setup executables
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw 'Inno Setup compiler is unavailable' }
+          $env:VK_VERSION = '1.3.1'
+          $env:VK_OUTPUT_DIR = Join-Path $env:RUNNER_TEMP 'installers'
+          New-Item -ItemType Directory -Path $env:VK_OUTPUT_DIR -Force | Out-Null
+          foreach ($architecture in @('x64', 'arm64')) {
+            $env:VK_ARCH = $architecture
+            $env:VK_SOURCE_DIR = Join-Path $env:RUNNER_TEMP "package-$architecture"
+            $archive = Join-Path $PWD "platforms/windows/$architecture/1.3.1/vektkove-1.3.1-windows-$architecture.zip"
+            Expand-Archive $archive -DestinationPath $env:VK_SOURCE_DIR
+            & $compiler portable/windows-installer.iss
+            if ($LASTEXITCODE -ne 0) { throw "Installer build failed for $architecture" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-1.3.1
+          path: ${{ runner.temp }}/installers/*.exe
+          if-no-files-found: error
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - {runner: windows-2025, arch: x64}
+          - {runner: windows-11-arm, arch: arm64}
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installers-1.3.1
+          path: installers
+      - name: Install, run, and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $PWD 'installers/vektkove-1.3.1-windows-${{ matrix.platform.arch }}-setup.exe'
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs/Vektkove'
+          $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $installDir) { throw 'Installer did not add Vektkove to the user PATH' }
+          $env:PATH = "$env:PATH;$userPath"
+          $command = (Get-Command vk.exe -ErrorAction Stop).Source
+          $reported = & $command --version
+          if ($LASTEXITCODE -ne 0 -or $reported -ne 'Vektkove 1.3.1') { throw 'Installed version check failed' }
+          if (-not (Test-Path (Join-Path $installDir 'MANUAL.md'))) { throw 'Installed manual is missing' }
+          $output = & $command run (Join-Path $installDir 'examples/hello.vk')
+          if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -ne "Hello from Vektkove`n5") { throw 'Installed example failed' }
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or (Test-Path (Join-Path $installDir 'vk.exe'))) { throw 'Uninstall failed' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -contains $installDir) { throw 'Uninstaller left Vektkove in the user PATH' }

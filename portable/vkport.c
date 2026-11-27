@@ -15,7 +15,8 @@
 #include <time.h>
 #include <sodium.h>
 #include "vkcodec.h"
-#define VK_VERSION "1.3.0"
+#include "vkai.h"
+#define VK_VERSION "1.3.1"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
@@ -60,7 +61,8 @@ enum {
     OP_UIPHYSICS2D, OP_UIGRAVITY2D, OP_UIFRAME2D, OP_UIENDFRAME2D, OP_UIMOVE2D, OP_UIFORCE2D, OP_UISETVELOCITY2D, OP_UIFRAMEDATA,
     OP_UIPHYSICS3D, OP_UIGRAVITY3D, OP_UIFRAME3D, OP_UIENDFRAME3D, OP_UIMOVE3D, OP_UIFORCE3D, OP_UISETVELOCITY3D, OP_UIVELOCITY3D,
     OP_UIMESH3D,
-    OP_ENCODE, OP_DECODE, OP_CODECLIST
+    OP_ENCODE, OP_DECODE, OP_CODECLIST,
+    OP_AICONFIGURE, OP_TRAIN, OP_AICLEAR, OP_AIASK
 };
 
 typedef struct { const char *aliases; int opcode; int arity; } Definition;
@@ -127,7 +129,9 @@ static const Definition definitions[] = {
     {"ui_set_velocity3d set_velocity3d game_set_velocity3d", OP_UISETVELOCITY3D, 4},
     {"ui_velocity3d velocity3d game_velocity3d", OP_UIVELOCITY3D, 4}, {"ui_mesh3d", OP_UIMESH3D, 6},
     {"encode encode_text text_encode", OP_ENCODE, 2}, {"decode decode_text text_decode", OP_DECODE, 2},
-    {"codec_list list_codecs codecs", OP_CODECLIST, 0}
+    {"codec_list list_codecs codecs", OP_CODECLIST, 0},
+    {"ai_config ai_configure", OP_AICONFIGURE, 2}, {"train ai_train", OP_TRAIN, 2},
+    {"ai_clear clear_knowledge", OP_AICLEAR, 0}, {"ai_ask ask_ai", OP_AIASK, 2}
 };
 #define DEFINITION_COUNT (sizeof(definitions) / sizeof(definitions[0]))
 
@@ -679,6 +683,8 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
     for (size_t i = 0; i < count; i++) if (code[i].opcode == OP_LABEL)
         for (size_t j = i + 1; j < count; j++) if (code[j].opcode == OP_LABEL && !strcmp(code[i].operands[0], code[j].operands[0])) { snprintf(message, size, "Duplicate label."); release_instructions(code, count); return 0; }
     Variables variables = {NULL, 0};
+    VKAIContext ai_context;
+    vk_ai_init(&ai_context);
     int ok = 0; size_t steps = 0;
     for (size_t index = 0; index < count; index++) {
         if (++steps > 100000) { snprintf(message, size, "Execution limit exceeded."); goto done; }
@@ -1231,12 +1237,37 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             if (output->size > 100000) { snprintf(message, size, "Output limit exceeded."); goto done; }
             continue;
         }
+        if (op == OP_AICLEAR) { vk_ai_clear(&ai_context); continue; }
+        if (op == OP_AICONFIGURE || op == OP_TRAIN) {
+            Value first = {0}, second = {0};
+            int good = resolve(ins->operands[0], &variables, &first, message, size) &&
+                       resolve(ins->operands[1], &variables, &second, message, size);
+            if (good && (first.is_number || second.is_number || !first.text || !second.text)) {
+                snprintf(message, size, "AI command operands must be text.");
+                good = 0;
+            }
+            if (good) good = op == OP_AICONFIGURE
+                ? vk_ai_configure(&ai_context, first.text, second.text, message, size)
+                : vk_ai_train(&ai_context, first.text, second.text, message, size);
+            value_clear(&first); value_clear(&second);
+            if (!good) goto done;
+            continue;
+        }
         const char *name = ins->operands[0];
         if (!valid_name(name)) { snprintf(message, size, "Invalid variable name."); goto done; }
         Variable *original = find_variable(&variables, name);
         if (ins->count > 1 && !resolve(ins->operands[1], &variables, &value, message, size)) goto done;
         if (op == OP_TEXT) { char *t = value_text(&value); value_clear(&value); if (!t) goto done; Value stored = {0, 0, t}; if (!assign(&variables, name, &stored)) goto done; continue; }
         if (op == OP_SET) { if (!assign(&variables, name, &value)) { value_clear(&value); goto done; } continue; }
+        if (op == OP_AIASK) {
+            if (value.is_number || !value.text) { value_clear(&value); snprintf(message, size, "ai_ask requires a text question."); goto done; }
+            char *answer = vk_ai_ask(&ai_context, value.text, message, size);
+            value_clear(&value);
+            if (!answer) goto done;
+            Value stored = {0, 0, answer};
+            if (!assign(&variables, name, &stored)) { value_clear(&stored); goto done; }
+            continue;
+        }
         if (!original) { snprintf(message, size, "Unknown variable $%s.", name); value_clear(&value); goto done; }
         Value result = {0};
         int handled = 1;
@@ -1318,6 +1349,7 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
     ok = 1;
 done:
     *ui_total = ui_count;
+    vk_ai_destroy(&ai_context);
     vk_game_socket_close(network_socket);
     for (size_t client = 0; client < network_client_count; client++) vk_game_socket_close(network_clients[client]);
 #ifdef _WIN32

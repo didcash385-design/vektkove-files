@@ -12,7 +12,7 @@ build() {  # name target output [extra flags]
   name="$1"; target="$2"; output="$3"; shift 3
   portable/build-sodium.sh "$name" >/dev/null
   mkdir -p "dist/$name"
-  "$ZIG" cc -target "$target" -std=c11 -O2 -s -Wall -Wextra -DSODIUM_STATIC -Ideps/sodium-"$name"/include "$@" portable/vkport.c deps/sodium-"$name"/lib/libsodium.a -o "dist/$name/$output"
+  "$ZIG" cc -target "$target" -std=c11 -O2 -s -Wall -Wextra -DCJSON_HIDE_SYMBOLS -DSODIUM_STATIC -Ideps/sodium-"$name"/include "$@" portable/vkport.c portable/vkai.c portable/vkjson.c deps/sodium-"$name"/lib/libsodium.a -o "dist/$name/$output"
   echo "built dist/$name/$output"
 }
 

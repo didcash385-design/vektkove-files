@@ -1,4 +1,4 @@
-# Vektkove 1.3.0 Manual
+# Vektkove 1.3.1 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -8,6 +8,7 @@ Vektkove is a custom programming language and native macOS editor. Source files 
 - [Editor and project files](#editor-and-project-files)
 - [Language basics](#language-basics)
 - [Instruction reference](#instruction-reference)
+- [AI questions and knowledge](#ai-questions-and-knowledge)
 - [Native user interfaces](#native-user-interfaces)
 - [3D rendering](#3d-rendering)
 - [2D Games](#2d-games)
@@ -24,7 +25,7 @@ Vektkove.app and VektkoveLauncher.app run on macOS 11 or later on Intel and Appl
 
 In the editor, choose **Open Folder** to show a project in the explorer. Select a file to edit it. Use the file-plus and folder-plus controls to create files and folders in the selected directory; existing items are not overwritten. Use **Refresh** to pick up filesystem changes. **Save** writes the source, **Compile** writes `.vkb` bytecode, and **Test Code** runs the current editor contents, including unsaved edits, in the launcher.
 
-The editor and launcher follow the system light or dark appearance. **A-** and **A+**, or the View menu, change code and output text size. The **Manual** tab searches instruction spellings, filters by Code, Logic, Math, Text, or UI, sorts alphabetically or by category, and pages through the command list.
+The editor and launcher follow the system light or dark appearance. **A-** and **A+**, or the View menu, change code and output text size. The **Manual** tab searches instruction spellings, filters by Code, Logic, Math, Text, or UI, and includes **All**, **2D**, and **3D** command tabs. The 2D and 3D tabs include aliases and shared window and UI commands. Sort alphabetically or by category and page through the command list.
 
 ## Editor and Project Files
 
@@ -79,6 +80,35 @@ The spellings in the first column are the canonical instructions. Other listed n
 Terminal utilities are interpreter built-ins, not shell execution. `terminal_run "date"` prints the UTC date in `YYYY-MM-DD` form; `terminal_run "pwd"` prints the process working directory; `terminal_run "help"` prints the allowlist. Use `terminal_echo value` for text. Unsupported `terminal_run` keywords return an error.
 
 `cite` formats only the values supplied in the instruction; it does not search for or verify the source. The author, title, and URL must be nonempty text; the year may be text or a number.
+
+### AI Instructions
+
+| Instruction | Operands | Behavior |
+| --- | --- | --- |
+| `ai_config` | backend model | Select `ollama` or `openai` and the model name. |
+| `train` | source value | Add UTF-8 reference text from `text`, `file`, `url`, or a Wikipedia `topic`. |
+| `ai_ask` | name question | Ask the configured model and store its answer in a text variable. |
+| `ai_clear` | none | Clear the current program's reference data. |
+
+### AI Questions and Knowledge
+
+`train` gathers reference data for later questions. It does not train, fine-tune, or change model weights. Knowledge belongs to the current program run and is cleared when that run ends; use `ai_clear` to clear it earlier.
+
+```text
+ai_config "ollama" "llama3.2"
+train "topic" "solar power"
+train "text" "My project uses solar panels."
+ai_ask answer "How do solar panels work?"
+out $answer
+```
+
+`train "topic" "solar power"` searches English Wikipedia and adds up to three introductory extracts. `train "url" "https://example.com/page"` adds the returned UTF-8 text, including any HTML markup. `train "file" "notes.txt"` reads a local UTF-8 text, CSV, or JSON file as text; relative paths use the process working directory. `train "text" value` adds the supplied text or text variable. See `examples/ai.vk` for a complete program.
+
+Install `curl` on Linux or macOS and make it available on PATH; Windows uses the system `curl.exe`. The `ollama` backend requires Ollama running locally with the selected model already installed. The default endpoint is `http://127.0.0.1:11434/api/chat`; `VEKTKOVE_OLLAMA_URL` can override it. The `openai` backend requires `OPENAI_API_KEY` in the process environment and defaults to `https://api.openai.com/v1/chat/completions`; `VEKTKOVE_OPENAI_URL` can select an OpenAI-compatible endpoint. Choose a model available to the selected service. HTTPS is required except for explicit localhost or 127.0.0.1 HTTP endpoints. `VEKTKOVE_WIKIPEDIA_URL` can override the Wikipedia API base URL.
+
+Online training sends the topic or URL to the selected source. Asking a hosted model sends the question and all current reference data to that service; local Ollama receives them on its configured endpoint. Requests use temporary files that may contain the question, reference data, or API key during the request. Do not put credentials in `.vk` source or train on confidential material unless you trust the selected service and machine. Web content is untrusted and may contain misleading instructions; model answers can be incorrect and must be checked.
+
+Knowledge is limited to 256 KiB per program, responses to 1 MiB, questions to 32,768 bytes, and answers to 65,536 bytes. Requests have a 30-second timeout. Errors are reported for unavailable services, missing API keys, oversized or non-UTF-8 data, and invalid formats.
 
 ### Encoding and Compression
 
@@ -296,7 +326,7 @@ The native app renders scenes. `vk` and the portable runner validate and compile
 
 ## UI Maker
 
-Choose **UI Maker** in the editor. Use **3D Scene** to start with all six primitives, add them individually from **Add 3D shape**, or use **Import 3D Model** for supported local geometry. The design canvas is a 2D layout of 3D object positions; **Preview** opens the rendered scene. Set camera and gravity using the fields above the canvas. The table contains Z, depth, optional mass, bounce, velocity (VX/VY/VZ), and spin period fields; leave mass blank for a decorative shape without collisions. X/Y and width/height are canvas points converted to world units (40 points per unit), Z is in world units, and depth is in canvas points. Imported models scale uniformly using the width field; their height and depth fields do not affect the mesh. Use the color well for object colors.
+Choose **3D Editor** in the main editor to open the 3D scene tools. An empty design starts with the six default shapes; reopening the editor preserves an existing design. You can also choose **UI Maker**, then select **3D Scene** from the starter layouts. Add primitives from **Add 3D shape**, or use **Import 3D Model** for supported local geometry. The design canvas is a 2D layout of 3D object positions; **Preview** opens the rendered scene. Set camera and gravity using the fields above the canvas. The table contains Z, depth, optional mass, bounce, velocity (VX/VY/VZ), and spin period fields; leave mass blank for a decorative shape without collisions. X/Y and width/height are canvas points converted to world units (40 points per unit), Z is in world units, and depth is in canvas points. Imported models scale uniformly using the width field; their height and depth fields do not affect the mesh. Use the color well for object colors. Use **Draw** or **Apply Code** to edit the generated 3D instructions in the main editor.
 
 The **2D Game** starter and ordinary form layouts remain available. Add labels, inputs, or buttons; select a control to edit its text, ID, binding variable, position, size, message, and background color in the table or with the color well. Drag a control to move it. Drag its lower-right handle to resize it. **Remove** deletes the selected control; **Duplicate** makes a copy offset by one grid step and assigns it a new ID. **Import Sound** adds local audio files to the generated program; **Clear Sounds** removes those startup sounds.
 

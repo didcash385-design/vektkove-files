@@ -29,3 +29,6 @@ The Windows builds do not include the macOS editor, launcher, UI Maker, or graph
 rendering. UI instructions are validated but cannot display windows. VKLINK chat is
 available through `vk chat listen ADDRESS PORT` and `vk chat connect ADDRESS PORT`.
 Use only a trusted network and a strong shared passphrase.
+
+AI instructions require the Windows system `curl.exe` and either a running Ollama
+model or an OpenAI-compatible service. See the included manual for setup and privacy.

@@ -1,12 +1,12 @@
-Read the [complete Vektkove manual](MANUAL.md) for editor, language, UI Maker, command-line, and VKLINK instructions. The editor and launcher follow the Mac's light or dark appearance. Use **A-** and **A+**, or the View menu, to adjust code and output text size. Select the **Manual** tab to search command names, filter by Code, Logic, Math, Text, or UI, sort command spellings A-Z or group them by category, and page through all results.
+Read the [complete Vektkove manual](MANUAL.md) for editor, language, UI Maker, command-line, and VKLINK instructions. The editor and launcher follow the Mac's light or dark appearance. Use **A-** and **A+**, or the View menu, to adjust code and output text size. Select the **Manual** tab to search command names, filter by Code, Logic, Math, Text, or UI, switch between All, 2D, and 3D command tabs, sort command spellings A-Z or group them by category, and page through all results.
 To rebuild, install Apple Command Line Tools and run `make` in this folder. Run `make test` for the interpreter, native UI, and command-line checks. The build contains both x86_64 and arm64 macOS slices. Tests run on the host architecture.
-# Vektkove 1.3.0
+# Vektkove 1.3.1
 
-Vektkove is a custom, deterministic programming language and native Mac editor. It does not use AI, JavaScript, Node.js, or an external runtime. `.vk` source is compiled to Vektkove's `VK01` bytecode and executed by its interpreter.
+Vektkove is a custom programming language and native Mac editor. `.vk` source is compiled to Vektkove's `VK01` bytecode and executed by its interpreter. Optional AI commands use `curl` and a separately provided local or hosted model; ordinary programs do not require an AI service.
 
 ## Versioned Files
 
-The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.3.0. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
+The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.3.1. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
 ## Start
 
@@ -75,6 +75,10 @@ The interpreter limits programs to 100,000 executed instructions and output to 1
 
 Use `vk formats` to list the supported codecs. `vk encode base64 input.txt output.txt` and `vk decode base64 input.txt output.txt` transform files; omit the paths or use `-` for standard input or output. For example, `vk encode zstd+base64 input.txt output.txt` and `vk decode base64+zstd output.txt restored.txt` reverse each other. In `.vk` programs, `encode name "base64"` and `decode name "base64"` update an existing text variable. See the manual for formats and limits.
 
+## AI Questions
+
+`ai_config`, `train`, `ai_ask`, and `ai_clear` let programs gather reference text and ask an Ollama or OpenAI-compatible model questions. `train` adds context; it does not retrain model weights. See [examples/ai.vk](examples/ai.vk) and the manual for setup, limits, and privacy details.
+
 ## Platforms
 
 | Platform | What is provided | Status |
@@ -94,6 +98,6 @@ To compare the portable runner with the macOS engine, `portable/difftest.sh` and
 
 ## UI Maker
 
-Open **UI Maker** in the app. Choose one of 20 starter layouts or add labels, input fields, and buttons. Drag an object to move it, or drag its bottom-right corner to resize it. The canvas grid snaps positions and sizes by default; change its spacing or turn snapping off. Duplicate the selected control, edit its ID and binding variable in the table, and set its color with the color well. **Draw** immediately applies generated source to the editor and opens a live line-numbered view. **Apply Code** remains available from the maker toolbar. Import startup sounds and preview the design. UI source begins with `import ui`. Buttons display messages and can insert input text using `{input}` or an input's placeholder in braces. See [MANUAL.md](MANUAL.md) for the complete instructions.
+Open **UI Maker** in the app, or choose **3D Editor** for the 3D scene tools. An empty design starts with a 3D scene; an existing design is preserved. Choose a starter layout or add labels, input fields, and buttons. Drag an object to move it, or drag its bottom-right corner to resize it. The canvas grid snaps positions and sizes by default; change its spacing or turn snapping off. Duplicate the selected control, edit its ID and binding variable in the table, and set its color with the color well. **Draw** immediately applies generated source to the editor and opens a live line-numbered view. **Apply Code** remains available from the maker toolbar. Import startup sounds and preview the design. UI source begins with `import ui`. Buttons display messages and can insert input text using `{input}` or an input's placeholder in braces. See [MANUAL.md](MANUAL.md) for the complete instructions.
 
 For native 3D scenes, write `.vk` source directly or use UI Maker; see `examples/scene3d.vk` and `examples/code3d.vk`. Select Basic for Vektkove's original rasterizer or Regular for the Mini3D-based rasterizer by Linwei (MIT license). Both support camera orbit, Shift-drag pan, scroll zoom, point lights, primitive meshes, and continuous object rotation. See [third_party/mini3d/LICENSE](third_party/mini3d/LICENSE).

@@ -1131,6 +1131,7 @@ static BOOL testInstrumentRendering(NSString *instrument) {
 @property (strong) NSTableView *manualTable;
 @property (strong) NSSearchField *manualSearch;
 @property (strong) NSPopUpButton *manualCategory;
+@property (strong) NSSegmentedControl *manualDimension;
 @property (strong) NSSegmentedControl *manualSort;
 @property (strong) NSTextField *manualPageLabel;
 @property (strong) NSMutableArray<NSString *> *manualBaseMatches;
@@ -1195,7 +1196,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.3.0";
+    self.window.title = @"Vektkove 1.3.1";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1210,10 +1211,13 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     heading.font = [NSFont systemFontOfSize:18 weight:NSFontWeightBold];
     heading.autoresizingMask = NSViewMinYMargin;
     [content addSubview:heading];
-    NSArray *titles = @[@"New", @"Open Folder", @"Save", @"Compile", @"Test Code", @"UI Maker"];
-    NSArray *actions = @[@"newFile:", @"openFolder:", @"saveFile:", @"compileFile:", @"runCode:", @"showBuilder:"];
+    NSArray *titles = @[@"New", @"Open Folder", @"Save", @"Compile", @"Test Code", @"UI Maker", @"3D Editor"];
+    NSArray *actions = @[@"newFile:", @"openFolder:", @"saveFile:", @"compileFile:", @"runCode:", @"showBuilder:", @"show3DEditor:"];
+    NSArray *positions = @[@20, @109, @213, @297, @386, @480, @574];
+    NSArray *widths = @[@85, @100, @80, @85, @90, @90, @90];
     for (NSUInteger index = 0; index < titles.count; index++) {
-        NSButton *control = button(titles[index], NSMakeRect(20 + index * 110, 634, 105, 30), self, NSSelectorFromString(actions[index]));
+        NSButton *control = button(titles[index], NSMakeRect([positions[index] doubleValue], 634, [widths[index] doubleValue], 30), self, NSSelectorFromString(actions[index]));
+        if (index == 6) control.toolTip = @"Open the 3D scene editor";
         control.autoresizingMask = NSViewMinYMargin;
         [content addSubview:control];
     }
@@ -1345,11 +1349,13 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     (void)sender;
     NSString *licensePath = [NSBundle.mainBundle pathForResource:@"Mini3D-LICENSE" ofType:@"txt"];
     NSString *miniLicense = licensePath ? [NSString stringWithContentsOfFile:licensePath encoding:NSUTF8StringEncoding error:nil] : @"";
-    NSString *creditText = [NSString stringWithFormat:@"Regular 3D rasterizer: Mini3D by Linwei (skywind3000).\n\n%@\n\n%@", miniLicense, VKLicenseText];
+    NSString *jsonPath = [NSBundle.mainBundle pathForResource:@"cJSON-LICENSE" ofType:@"txt"];
+    NSString *jsonLicense = jsonPath ? [NSString stringWithContentsOfFile:jsonPath encoding:NSUTF8StringEncoding error:nil] : @"";
+    NSString *creditText = [NSString stringWithFormat:@"Regular 3D rasterizer: Mini3D by Linwei (skywind3000).\n\n%@\n\nJSON parsing: cJSON by Dave Gamble and contributors.\n\n%@\n\n%@", miniLicense, jsonLicense, VKLicenseText];
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.3.0",
+        NSAboutPanelOptionApplicationVersion: @"1.3.1",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -1397,18 +1403,24 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     self.manualSort.autoresizingMask = NSViewMinYMargin;
     self.manualSort.toolTip = @"Sort command names A-Z or group them by category";
     [self.manualView addSubview:self.manualSort];
-    NSButton *previous = button(@"<", NSMakeRect(frame.size.width - 215, frame.size.height - 34, 42, 26), self, @selector(previousManualPage:));
-    NSButton *next = button(@">", NSMakeRect(frame.size.width - 47, frame.size.height - 34, 42, 26), self, @selector(nextManualPage:));
+    self.manualDimension = [NSSegmentedControl segmentedControlWithLabels:@[@"All", @"2D", @"3D"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(manualDimensionChanged:)];
+    self.manualDimension.frame = NSMakeRect(0, frame.size.height - 68, 210, 26);
+    self.manualDimension.selectedSegment = 0;
+    self.manualDimension.autoresizingMask = NSViewMinYMargin;
+    self.manualDimension.toolTip = @"Show all, 2D, or 3D commands";
+    [self.manualView addSubview:self.manualDimension];
+    NSButton *previous = button(@"<", NSMakeRect(frame.size.width - 215, frame.size.height - 68, 42, 26), self, @selector(previousManualPage:));
+    NSButton *next = button(@">", NSMakeRect(frame.size.width - 47, frame.size.height - 68, 42, 26), self, @selector(nextManualPage:));
     previous.toolTip = @"Previous commands"; next.toolTip = @"Next commands";
     previous.autoresizingMask = next.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin;
     [self.manualView addSubview:previous]; [self.manualView addSubview:next];
     self.manualPageLabel = [NSTextField labelWithString:@""];
-    self.manualPageLabel.frame = NSMakeRect(frame.size.width - 169, frame.size.height - 30, 118, 20);
+    self.manualPageLabel.frame = NSMakeRect(frame.size.width - 169, frame.size.height - 64, 118, 20);
     self.manualPageLabel.alignment = NSTextAlignmentCenter;
     self.manualPageLabel.font = [NSFont systemFontOfSize:11];
     self.manualPageLabel.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin;
     [self.manualView addSubview:self.manualPageLabel];
-    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height - 42)];
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height - 76)];
     scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     scroll.borderType = NSBezelBorder;
     scroll.hasVerticalScroller = YES;
@@ -1457,18 +1469,29 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self filterManual];
 }
 - (void)manualSortChanged:(id)sender { (void)sender; [self filterManual]; }
+- (void)manualDimensionChanged:(id)sender {
+    (void)sender;
+    [self reloadManualCategories];
+    [self.manualCategory selectItemAtIndex:0];
+    [self filterManual];
+}
 - (void)reloadManualCategories {
     NSArray *names = @[@"Code", @"Logic", @"Math", @"Text", @"UI"];
     NSUInteger counts[5] = {0, 0, 0, 0, 0};
+    NSUInteger total = 0;
+    NSInteger selectedDimension = self.manualDimension.selectedSegment == 1 ? 2 : self.manualDimension.selectedSegment == 2 ? 3 : 0;
     for (NSUInteger index = 0; index < VKEngine.baseKeywordCount; index++) {
-        NSString *category = [VKEngine categoryForKeyword:[VKEngine keywordAtIndex:index]];
+        NSString *keyword = [VKEngine keywordAtIndex:index];
+        NSInteger dimension = [VKEngine dimensionForKeyword:keyword];
+        if (selectedDimension && dimension != selectedDimension && dimension != -1) continue;
+        NSString *category = [VKEngine categoryForKeyword:keyword];
         NSUInteger categoryIndex = [names indexOfObject:category];
-        if (categoryIndex < 5) counts[categoryIndex]++;
+        if (categoryIndex < 5) { counts[categoryIndex]++; total++; }
     }
     NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
     formatter.numberStyle = NSNumberFormatterDecimalStyle;
     [self.manualCategory removeAllItems];
-    [self.manualCategory addItemWithTitle:[NSString stringWithFormat:@"All (%@)", [formatter stringFromNumber:@(VKEngine.keywordCount)]]];
+    [self.manualCategory addItemWithTitle:[NSString stringWithFormat:@"All (%@)", [formatter stringFromNumber:@(total)]]];
     self.manualCategory.lastItem.tag = 0;
     for (NSUInteger index = 0; index < names.count; index++) {
         [self.manualCategory addItemWithTitle:[NSString stringWithFormat:@"%@ (%@)", names[index], [formatter stringFromNumber:@(counts[index])]]];
@@ -1484,9 +1507,12 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     self.manualBaseMatches = [NSMutableArray array];
     self.manualCategoryBaseCounts = [NSMutableDictionary dictionary];
     self.manualCount = 0; self.manualPage = 0;
+    NSInteger selectedDimension = self.manualDimension.selectedSegment == 1 ? 2 : self.manualDimension.selectedSegment == 2 ? 3 : 0;
     for (NSUInteger index = 0; index < VKEngine.baseKeywordCount; index++) {
         NSString *keyword = [VKEngine keywordAtIndex:index];
-        if ((!query.length || [keyword hasPrefix:query]) && (!selectedCategory || [[VKEngine categoryForKeyword:keyword] isEqualToString:selectedCategory])) [self.manualBaseMatches addObject:keyword];
+        NSInteger dimension = [VKEngine dimensionForKeyword:keyword];
+        if ((!selectedDimension || dimension == selectedDimension || dimension == -1) &&
+            (!query.length || [keyword hasPrefix:query]) && (!selectedCategory || [[VKEngine categoryForKeyword:keyword] isEqualToString:selectedCategory])) [self.manualBaseMatches addObject:keyword];
     }
     if (self.manualSort.selectedSegment == 1) {
         [self.manualBaseMatches sortUsingComparator:^NSComparisonResult(NSString *first, NSString *second) {
@@ -2146,7 +2172,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
 
 - (void)showBuilder:(id)sender {
     (void)sender;
-    if (self.builder) { [self.builder makeKeyAndOrderFront:nil]; return; }
+    if (self.builder) { self.builder.title = @"Vektkove UI Maker"; [self.builder makeKeyAndOrderFront:nil]; return; }
     self.builder = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 650) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
     self.builder.title = @"Vektkove UI Maker";
     self.builder.releasedWhenClosed = NO;
@@ -2274,6 +2300,15 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [view addSubview:self.builderTemplates];
     [self.builder center];
     [self.builder makeKeyAndOrderFront:nil];
+}
+
+- (void)show3DEditor:(id)sender {
+    [self showBuilder:sender];
+    if (!self.elements.count) {
+        [self.builderTemplates selectItemWithTitle:@"3D Scene"];
+        [self applyBuilderTemplate:nil];
+    }
+    self.builder.title = @"Vektkove 3D Editor";
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
@@ -2886,7 +2921,30 @@ int main(int argc, const char *argv[]) {
                 if (previousAlpha && [previousAlpha compare:keyword options:NSLiteralSearch] == NSOrderedDescending) return 48;
                 previousAlpha = keyword;
             }
+            delegate.manualDimension.selectedSegment = 1;
+            [delegate manualDimensionChanged:nil];
+            if (![delegate.manualBaseMatches containsObject:@"ui_scene2d"] || ![delegate.manualBaseMatches containsObject:@"op_game_rect"] ||
+                [delegate.manualBaseMatches containsObject:@"ui_scene3d"] || ![delegate.manualBaseMatches containsObject:@"window"]) return 109;
+            if (![delegate.manualCategory.itemTitles[0] containsString:[testFormatter stringFromNumber:@(delegate.manualCount)]]) return 114;
+            delegate.manualDimension.selectedSegment = 2;
+            [delegate manualDimensionChanged:nil];
+            if (![delegate.manualBaseMatches containsObject:@"ui_scene3d"] || ![delegate.manualBaseMatches containsObject:@"vk_box3d"] ||
+                [delegate.manualBaseMatches containsObject:@"ui_scene2d"] || ![delegate.manualBaseMatches containsObject:@"ui_id"]) return 110;
+            delegate.manualDimension.selectedSegment = 0;
+            [delegate manualDimensionChanged:nil];
+            BOOL has3DEditorButton = NO;
+            for (NSView *subview in delegate.window.contentView.subviews) {
+                if ([subview isKindOfClass:NSButton.class] && [(NSButton *)subview action] == @selector(show3DEditor:)) has3DEditorButton = YES;
+            }
+            if (!has3DEditorButton) return 111;
+            [delegate show3DEditor:nil];
+            if (delegate.elements.count != 6 || ![delegate.builder.title isEqualToString:@"Vektkove 3D Editor"] ||
+                ![[delegate builderSource] containsString:@"ui_scene3d"]) return 112;
+            delegate.elements[0][@"text"] = @"Keep this design";
+            [delegate show3DEditor:nil];
+            if (delegate.elements.count != 6 || ![delegate.elements[0][@"text"] isEqualToString:@"Keep this design"]) return 113;
             [delegate showBuilder:nil];
+            if (![delegate.builder.title isEqualToString:@"Vektkove UI Maker"] || delegate.elements.count != 6) return 115;
             if (delegate.builderTemplates.numberOfItems != 23) return 67;
             [delegate.builderTemplates selectItemAtIndex:9];
             [delegate applyBuilderTemplate:nil];
