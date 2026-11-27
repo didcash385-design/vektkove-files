@@ -94,7 +94,7 @@ try {
       if (bytecode && !bytecode.equals(current)) throw new Error('AI bytecode differs between engines');
       bytecode = current;
       const run = await execute(engine, ['run', compiled]);
-      if (run.code !== 0 || run.stdout !== 'Ollama answer\nOpenAI answer\n') {
+      if (run.code !== 0 || run.stdout.replace(/\r\n/g, '\n') !== 'Ollama answer\nOpenAI answer\n') {
         throw new Error(`AI program failed: ${run.stderr} ${run.stdout}`);
       }
       const failures = [
