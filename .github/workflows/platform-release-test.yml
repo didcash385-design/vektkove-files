@@ -18,7 +18,7 @@ jobs:
           - {runner: ubuntu-24.04, os: linux, arch: x64, extension: tar.gz}
           - {runner: ubuntu-24.04-arm, os: linux, arch: arm64, extension: tar.gz}
           - {runner: macos-15-intel, os: macos, arch: x64, extension: tar.gz}
-          - {runner: macos-14, os: macos, arch: arm64, extension: tar.gz}
+          - {runner: macos-15, os: macos, arch: arm64, extension: tar.gz}
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Download and test release
