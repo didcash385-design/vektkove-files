@@ -15,7 +15,7 @@ ui_keymove2d "player" "w" 0 -14
 ui_keymove2d "player" "s" 0 14
 ui_frame2d
 add frames 1
-if $collision hit
+if $collision_entered hit
 jump frame_done
 label hit
 add hits 1

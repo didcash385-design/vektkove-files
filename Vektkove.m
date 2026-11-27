@@ -470,6 +470,7 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
 @property (nonatomic) VKVector3 gravity;
 @property (strong) NSArray *frameCallback;
 @property (strong) NSMutableDictionary *frameVariables;
+@property (strong) NSSet<NSArray<NSString *> *> *previousContacts;
 - (void)setCameraPosition:(VKVector3)position;
 - (void)addPointLight:(VKVector3)position intensity:(CGFloat)intensity;
 - (VK3DObject *)addPrimitive:(VKOpcode)opcode values:(NSArray *)values;
@@ -495,6 +496,7 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
         _lights = [NSMutableArray array];
         _objectsByID = [NSMutableDictionary dictionary];
         _voxelObjects = [NSMutableDictionary dictionary];
+        _previousContacts = [NSSet set];
         _cameraDistance = 12;
         _cameraTarget = VKVectorMake(0, 0, 0);
         _lastFrameTime = CACurrentMediaTime();
@@ -707,7 +709,7 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     NSUInteger substeps = MAX(1, MIN(8, (NSUInteger)ceil(maximumSpeed * elapsed / featureSize)));
     CGFloat step = elapsed / substeps;
     NSString *collisionA = @"", *collisionB = @"";
-    NSUInteger collisionCount = 0;
+    NSMutableSet<NSArray<NSString *> *> *contacts = [NSMutableSet set];
     for (NSUInteger substep = 0; substep < substeps; substep++) {
         for (VK3DObject *object in physicsObjects) {
             if (object.mass <= 0) continue;
@@ -719,8 +721,11 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
             VKVector3 delta = VKVectorSubtract(second.position, first.position);
             CGFloat distance = VKVectorLength(delta), penetration = first.boundingRadius + second.boundingRadius - distance;
             if (penetration <= 0) continue;
-            if (!collisionCount) { collisionA = first.identifier ?: @""; collisionB = second.identifier ?: @""; }
-            collisionCount++;
+            NSArray<NSString *> *pair = @[first.identifier ?: @"", second.identifier ?: @""];
+            if (![contacts containsObject:pair]) {
+                if (!contacts.count) { collisionA = pair[0]; collisionB = pair[1]; }
+                [contacts addObject:pair];
+            }
             CGFloat inverseFirst = first.mass > 0 ? 1 / first.mass : 0;
             CGFloat inverseSecond = second.mass > 0 ? 1 / second.mass : 0;
             CGFloat inverseTotal = inverseFirst + inverseSecond;
@@ -737,12 +742,27 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
             }
         }
     }
+    NSUInteger collisionCount = contacts.count;
+    BOOL collisionEntered = NO, collisionExited = NO;
+    for (NSArray<NSString *> *pair in contacts) if (![self.previousContacts containsObject:pair]) collisionEntered = YES;
+    for (NSArray<NSString *> *pair in self.previousContacts) if (![contacts containsObject:pair]) collisionExited = YES;
+    if (!collisionA.length && collisionExited) {
+        NSArray<NSString *> *pair = [[self.previousContacts.allObjects sortedArrayUsingComparator:^NSComparisonResult(NSArray<NSString *> *first, NSArray<NSString *> *second) {
+            NSComparisonResult order = [first[0] compare:second[0]];
+            return order == NSOrderedSame ? [first[1] compare:second[1]] : order;
+        }] firstObject];
+        collisionA = pair[0];
+        collisionB = pair[1];
+    }
+    self.previousContacts = [contacts copy];
     if (self.frameCallback && self.frameVariables) {
         self.frameVariables[@"delta_time"] = @(elapsed);
         self.frameVariables[@"collision"] = @(collisionCount != 0);
         self.frameVariables[@"collision_count"] = @(collisionCount);
         self.frameVariables[@"collision_a"] = collisionA;
         self.frameVariables[@"collision_b"] = collisionB;
+        self.frameVariables[@"collision_entered"] = @(collisionEntered);
+        self.frameVariables[@"collision_exited"] = @(collisionExited);
         NSString *error = nil;
         NSArray *actions = [VKEngine runFrameCallback:self.frameCallback variables:self.frameVariables error:&error];
         if (!actions) { NSLog(@"3D frame callback stopped: %@", error); self.frameCallback = nil; }
@@ -960,6 +980,7 @@ static BOOL VK2DDetectCollision(VK2DGameObject *first, VK2DGameObject *second, C
 @property CGPoint gravity;
 @property (strong) NSArray *frameCallback;
 @property (strong) NSMutableDictionary *frameVariables;
+@property (strong) NSSet<NSArray<NSString *> *> *previousContacts;
 - (void)setPhysicsForID:(NSString *)identifier mass:(CGFloat)mass restitution:(CGFloat)restitution;
 - (void)setGravityX:(CGFloat)x y:(CGFloat)y;
 - (void)setFrameCallback:(NSArray *)callback variables:(NSMutableDictionary *)variables;
@@ -976,6 +997,7 @@ static BOOL VK2DDetectCollision(VK2DGameObject *first, VK2DGameObject *second, C
     if (self) {
         _objects = [NSMutableArray array];
         _objectsByID = [NSMutableDictionary dictionaryWithCapacity:10];
+        _previousContacts = [NSSet set];
         _lastFrameTime = CACurrentMediaTime();
     }
     return self;
@@ -1032,7 +1054,7 @@ static BOOL VK2DDetectCollision(VK2DGameObject *first, VK2DGameObject *second, C
     NSUInteger substeps = MAX(1, MIN(8, (NSUInteger)ceil(maximumSpeed * elapsed / minimumSize)));
     CGFloat step = elapsed / substeps;
     NSString *collisionA = @"", *collisionB = @"";
-    NSUInteger collisionCount = 0;
+    NSMutableSet<NSArray<NSString *> *> *contacts = [NSMutableSet set];
     for (NSUInteger substep = 0; substep < substeps; substep++) {
         for (VK2DGameObject *object in self.objects) {
             if (object.mass <= 0) continue;
@@ -1052,8 +1074,11 @@ static BOOL VK2DDetectCollision(VK2DGameObject *first, VK2DGameObject *second, C
             VK2DGameObject *first = self.objects[firstIndex], *second = self.objects[secondIndex];
             CGPoint normal; CGFloat penetration = 0;
             if (!VK2DDetectCollision(first, second, &normal, &penetration)) continue;
-            if (!collisionCount) { collisionA = first.identifier; collisionB = second.identifier; }
-            collisionCount++;
+            NSArray<NSString *> *pair = @[first.identifier, second.identifier];
+            if (![contacts containsObject:pair]) {
+                if (!contacts.count) { collisionA = pair[0]; collisionB = pair[1]; }
+                [contacts addObject:pair];
+            }
             CGFloat inverseFirst = first.mass > 0 ? 1 / first.mass : 0;
             CGFloat inverseSecond = second.mass > 0 ? 1 / second.mass : 0;
             CGFloat inverseTotal = inverseFirst + inverseSecond;
@@ -1072,12 +1097,27 @@ static BOOL VK2DDetectCollision(VK2DGameObject *first, VK2DGameObject *second, C
             }
         }
     }
+    NSUInteger collisionCount = contacts.count;
+    BOOL collisionEntered = NO, collisionExited = NO;
+    for (NSArray<NSString *> *pair in contacts) if (![self.previousContacts containsObject:pair]) collisionEntered = YES;
+    for (NSArray<NSString *> *pair in self.previousContacts) if (![contacts containsObject:pair]) collisionExited = YES;
+    if (!collisionA.length && collisionExited) {
+        NSArray<NSString *> *pair = [[self.previousContacts.allObjects sortedArrayUsingComparator:^NSComparisonResult(NSArray<NSString *> *first, NSArray<NSString *> *second) {
+            NSComparisonResult order = [first[0] compare:second[0]];
+            return order == NSOrderedSame ? [first[1] compare:second[1]] : order;
+        }] firstObject];
+        collisionA = pair[0];
+        collisionB = pair[1];
+    }
+    self.previousContacts = [contacts copy];
     if (self.frameCallback && self.frameVariables) {
         self.frameVariables[@"delta_time"] = @(elapsed);
         self.frameVariables[@"collision"] = @(collisionCount != 0);
         self.frameVariables[@"collision_count"] = @(collisionCount);
         self.frameVariables[@"collision_a"] = collisionA;
         self.frameVariables[@"collision_b"] = collisionB;
+        self.frameVariables[@"collision_entered"] = @(collisionEntered);
+        self.frameVariables[@"collision_exited"] = @(collisionExited);
         NSString *error = nil;
         NSArray *actions = [VKEngine runFrameCallback:self.frameCallback variables:self.frameVariables error:&error];
         if (!actions) {
@@ -1314,7 +1354,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.3.2";
+    self.window.title = @"Vektkove 1.4.0";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1473,7 +1513,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.3.2",
+        NSAboutPanelOptionApplicationVersion: @"1.4.0",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -3098,6 +3138,7 @@ int main(int argc, const char *argv[]) {
             if (![delegate.builderTitle.stringValue isEqualToString:@"2D Game"] || delegate.elements.count != 2) return 78;
             NSString *gameSource = [delegate builderSource];
             if ([[[VKEngine diagnose:gameSource] componentsJoinedByString:@"\n"] containsString:@"Error "]) return 91;
+            gameSource = [gameSource stringByReplacingOccurrencesOfString:@"if $collision hit" withString:@"if $collision_entered hit"];
             NSString *gameError = nil;
             NSData *gameCode = [VKEngine compile:gameSource error:&gameError];
             NSMutableArray *gameUI = [NSMutableArray array];
@@ -3114,11 +3155,19 @@ int main(int argc, const char *argv[]) {
             if (gameView.objectsByID[@"player"].frame.origin.x != playerX + 12) return 82;
             VK2DGameObject *player = gameView.objectsByID[@"player"], *orb = gameView.objectsByID[@"orb"];
             orb.frame = NSMakeRect(NSMaxX(player.frame) - 14, NSMidY(player.frame) - 14, 28, 28);
-            orb.velocity = CGPointMake(-100, 0);
+            orb.mass = 0;
+            orb.velocity = CGPointMake(1000, 0);
             gameView.gravity = CGPointZero;
             gameView.lastFrameTime = CACurrentMediaTime() - 0.05;
             [gameView stepFrame];
-            if (![gameView.frameVariables[@"collision"] boolValue] || ![gameView.frameVariables[@"collision_a"] isEqualToString:@"player"] || ![gameView.frameVariables[@"collision_b"] isEqualToString:@"orb"] || ![gameView.frameVariables[@"hits"] isEqual:@1] || [gameView.frameVariables[@"delta_time"] doubleValue] <= 0) return 84;
+            if (![gameView.frameVariables[@"collision"] boolValue] || ![gameView.frameVariables[@"collision_entered"] boolValue] || [gameView.frameVariables[@"collision_exited"] boolValue] || ![gameView.frameVariables[@"collision_a"] isEqualToString:@"player"] || ![gameView.frameVariables[@"collision_b"] isEqualToString:@"orb"] || ![gameView.frameVariables[@"collision_count"] isEqual:@1] || ![gameView.frameVariables[@"hits"] isEqual:@1] || [gameView.frameVariables[@"delta_time"] doubleValue] <= 0) return 84;
+            gameView.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [gameView stepFrame];
+            if (![gameView.frameVariables[@"collision"] boolValue] || [gameView.frameVariables[@"collision_entered"] boolValue] || [gameView.frameVariables[@"collision_exited"] boolValue] || ![gameView.frameVariables[@"hits"] isEqual:@1]) return 118;
+            orb.frame = NSMakeRect(500, 300, 28, 28);
+            gameView.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [gameView stepFrame];
+            if ([gameView.frameVariables[@"collision"] boolValue] || [gameView.frameVariables[@"collision_entered"] boolValue] || ![gameView.frameVariables[@"collision_exited"] boolValue] || ![gameView.frameVariables[@"collision_a"] isEqualToString:@"player"] || ![gameView.frameVariables[@"collision_b"] isEqualToString:@"orb"]) return 119;
             [delegate.builderTemplates selectItemWithTitle:@"3D Scene"];
             [delegate applyBuilderTemplate:nil];
             if (delegate.elements.count != 6) return 85;
@@ -3155,6 +3204,7 @@ int main(int argc, const char *argv[]) {
             if (!importedModel || importedModel.triangles.count != 1 || importedModelView.objects.count != 8) return 99;
             delegate.builderGravity3D[1].stringValue = @"0";
             NSString *physics3DSource = @"set hits 0\nimport ui\nwindow \"Physics\" 320 240\nui_scene3d 0 0 320 240\nui_sphere3d 0 0 0 1 \"#FF5533\"\nui_id \"first\"\nui_physics3d \"first\" 0 1\nui_sphere3d 1.5 0 0 1 \"#33AAFF\"\nui_id \"second\"\nui_physics3d \"second\" 1 1\nui_velocity3d \"second\" -1 0 0\nui_frame3d\nif $collision hit3d\njump done3d\nlabel hit3d\nadd hits 1\nui_force3d \"second\" 0 1 0\nlabel done3d\nui_end_frame3d\nhalt";
+            physics3DSource = [physics3DSource stringByReplacingOccurrencesOfString:@"if $collision hit3d" withString:@"if $collision_entered hit3d"];
             if ([[[VKEngine diagnose:physics3DSource] componentsJoinedByString:@"\n"] containsString:@"Error "]) return 92;
             NSData *physics3DCode = [VKEngine compile:physics3DSource error:&gameError];
             NSMutableArray *physics3DUI = [NSMutableArray array];
@@ -3162,9 +3212,19 @@ int main(int argc, const char *argv[]) {
             [delegate showUI:physics3DUI];
             VK3DView *physics3DView = nil;
             for (NSView *subview in delegate.previewWindows.lastObject.contentView.subviews) if ([subview isKindOfClass:VK3DView.class]) physics3DView = (VK3DView *)subview;
+            physics3DView.objectsByID[@"second"].mass = 0;
+            physics3DView.objectsByID[@"second"].velocity = VKVectorMake(100, 0, 0);
             physics3DView.lastFrameTime = CACurrentMediaTime() - 0.02;
             [physics3DView stepFrame];
-            if (!physics3DView || ![physics3DView.frameVariables[@"collision"] boolValue] || ![physics3DView.frameVariables[@"hits"] isEqual:@1] || physics3DView.objectsByID[@"second"].velocity.y <= 0) return 89;
+            if (!physics3DView || ![physics3DView.frameVariables[@"collision"] boolValue] || ![physics3DView.frameVariables[@"collision_entered"] boolValue] || [physics3DView.frameVariables[@"collision_exited"] boolValue] || ![physics3DView.frameVariables[@"collision_count"] isEqual:@1] || ![physics3DView.frameVariables[@"hits"] isEqual:@1]) return 89;
+            physics3DView.lastFrameTime = CACurrentMediaTime() - 0.02;
+            physics3DView.objectsByID[@"second"].velocity = VKVectorMake(0, 0, 0);
+            [physics3DView stepFrame];
+            if (![physics3DView.frameVariables[@"collision"] boolValue] || [physics3DView.frameVariables[@"collision_entered"] boolValue] || [physics3DView.frameVariables[@"collision_exited"] boolValue] || ![physics3DView.frameVariables[@"hits"] isEqual:@1]) return 120;
+            physics3DView.objectsByID[@"second"].position = VKVectorMake(5, 0, 0);
+            physics3DView.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [physics3DView stepFrame];
+            if ([physics3DView.frameVariables[@"collision"] boolValue] || [physics3DView.frameVariables[@"collision_entered"] boolValue] || ![physics3DView.frameVariables[@"collision_exited"] boolValue] || ![physics3DView.frameVariables[@"collision_a"] isEqualToString:@"first"] || ![physics3DView.frameVariables[@"collision_b"] isEqualToString:@"second"]) return 121;
             [delegate.elements removeAllObjects];
             [delegate.table reloadData];
             delegate.builderTitle.stringValue = @"My Vektkove App";

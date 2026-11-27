@@ -733,7 +733,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         }
     }
     BOOL insideFrameCallback = NO;
-    NSSet<NSString *> *frameVariables = [NSSet setWithArray:@[@"delta_time", @"collision", @"collision_count", @"collision_a", @"collision_b"]];
+    NSSet<NSString *> *frameVariables = [NSSet setWithArray:@[@"delta_time", @"collision", @"collision_count", @"collision_a", @"collision_b", @"collision_entered", @"collision_exited"]];
     for (NSArray *entry in parsed) {
         VKOpcode opcode = [entry[1] unsignedCharValue];
         NSArray *tokens = entry[2];

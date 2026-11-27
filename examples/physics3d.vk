@@ -1,0 +1,22 @@
+set hits 0
+import ui
+window "3D Contact Events" 640 420
+ui_scene3d 20 20 600 380
+ui_camera3d 0 0 9
+ui_light3d 4 7 9 900
+ui_sphere3d -1.5 0 0 1 "#38A6D8"
+ui_id "left"
+ui_physics3d "left" 0 0.4
+ui_sphere3d 2 0 0 1 "#F15B40"
+ui_id "right"
+ui_physics3d "right" 1 0.4
+ui_velocity3d "right" -2 0 0
+ui_frame3d
+if $collision_entered hit
+jump done
+label hit
+add hits 1
+ui_force3d "right" 0 1 0
+label done
+ui_end_frame3d
+halt

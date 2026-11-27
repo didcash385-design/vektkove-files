@@ -1,12 +1,12 @@
 Read the [complete Vektkove manual](MANUAL.md) for editor, language, UI Maker, command-line, and VKLINK instructions. The editor and launcher follow the Mac's light or dark appearance. Use **A-** and **A+**, or the View menu, to adjust code and output text size. Select the **Manual** tab to search command names, filter by Code, Logic, Math, Text, or UI, switch between All, 2D, and 3D command tabs, sort command spellings A-Z or group them by category, and page through all results.
 To rebuild, install Apple Command Line Tools and run `make` in this folder. Run `make test` for the interpreter, native UI, and command-line checks. The build contains both x86_64 and arm64 macOS slices. Tests run on the host architecture.
-# Vektkove 1.3.2
+# Vektkove 1.4.0
 
 Vektkove is a custom programming language and native Mac editor. `.vk` source is compiled to Vektkove's `VK01` bytecode and executed by its interpreter. Optional AI commands use `curl` and a separately provided local or hosted model; ordinary programs do not require an AI service.
 
 ## Versioned Files
 
-The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.3.2. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
+The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.4.0. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
 ## Start
 
@@ -103,3 +103,5 @@ Open **UI Maker** in the app, or choose **3D Editor** for the 3D scene tools. An
 For native 3D scenes, write `.vk` source directly or use UI Maker; see `examples/scene3d.vk` and `examples/code3d.vk`. Select Basic for Vektkove's original rasterizer or Regular for the Mini3D-based rasterizer by Linwei (MIT license). Both support camera orbit, Shift-drag pan, scroll zoom, point lights, primitive meshes, and continuous object rotation. See [third_party/mini3d/LICENSE](third_party/mini3d/LICENSE).
 
 `examples/voxel3d.vk` demonstrates a flyable voxel world with mouse block placement and breaking. The manual describes the controls and 3D scripting commands; voxel edits are currently temporary and do not implement a full survival game.
+
+2D and 3D frame callbacks now expose `collision_entered` and `collision_exited` events, while `collision_count` reports unique contact pairs for the tick. See `examples/game2d.vk` and `examples/physics3d.vk`.

@@ -4,8 +4,8 @@
   <key>CFBundleName</key><string>VektkoveLauncher</string>
   <key>CFBundleDisplayName</key><string>VektkoveLauncher</string>
   <key>CFBundleIdentifier</key><string>com.vektkove.launcher</string>
-  <key>CFBundleVersion</key><string>1.3.2</string>
-  <key>CFBundleShortVersionString</key><string>1.3.2</string>
+  <key>CFBundleVersion</key><string>1.4.0</string>
+  <key>CFBundleShortVersionString</key><string>1.4.0</string>
   <key>CFBundleExecutable</key><string>VektkoveLauncher</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>

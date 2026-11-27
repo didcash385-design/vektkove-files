@@ -16,7 +16,7 @@
 #include <sodium.h>
 #include "vkcodec.h"
 #include "vkai.h"
-#define VK_VERSION "1.3.2"
+#define VK_VERSION "1.4.0"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else

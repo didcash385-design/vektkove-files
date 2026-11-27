@@ -1,4 +1,4 @@
-# Vektkove 1.3.2 Manual
+# Vektkove 1.4.0 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -306,7 +306,7 @@ The available meshes are box, sphere, cylinder, cone, torus, and plane. Give eac
 
 FBX, glTF/GLB, STEP, YDR, DFF, TXD, and YTD are not supported on the tested macOS installation. TXD and YTD are texture archives rather than standalone geometry. To use an unsupported model, convert its geometry to OBJ or STL in a compatible external tool first. Check local importer availability with `Vektkove.app/Contents/MacOS/Vektkove --model-formats`.
 
-`ui_physics3d` and `ui_velocity3d` enable collision and motion for named objects. The physics solver uses bounding spheres for every primitive, so contacts are approximate, especially for planes and long shapes. `ui_gravity3d` applies acceleration to enabled dynamic bodies. A `ui_frame3d` block supports the same bounded variable, arithmetic, and branch instructions and frame variables as the 2D callback, plus 3D move, force, and velocity actions. Frame actions must match the scene dimension.
+`ui_physics3d` and `ui_velocity3d` enable collision and motion for named objects. The physics solver uses bounding spheres for every primitive, so contacts are approximate, especially for planes and long shapes. `ui_gravity3d` applies acceleration to enabled dynamic bodies. A `ui_frame3d` block supports the same bounded variable, arithmetic, and branch instructions and frame variables as the 2D callback, plus 3D move, force, and velocity actions. `collision_entered` is true on the tick a contact begins, and `collision_exited` is true on the tick a contact ends. `collision_count` counts unique pairs in the current tick. Frame actions must match the scene dimension.
 
 ### Interactive 3D and Voxels
 
@@ -322,7 +322,7 @@ The 2D game scene supports bounded rectangles and circles, per-frame velocity, e
 
 Use `ui_scene2d x y width height` once after creating the window. Add rectangles with `ui_rect2d id x y width height "#RRGGBB"` and circles with `ui_circle2d id x y diameter "#RRGGBB"`. Bodies collide using axis-aligned rectangle/circle tests and impulse response. `ui_physics2d id mass restitution` sets mass (0 makes a static body) and bounce from 0 to 1; `ui_gravity2d x y` applies scene gravity. `ui_velocity2d id dx dy` sets initial velocity, and `ui_keymove2d id key dx dy` moves an object by a fixed amount on key press.
 
-One `ui_frame2d` / `ui_end_frame2d` block may contain variable updates, math, labels, branches, and `ui_move2d`, `ui_force2d`, or `ui_set_velocity2d` actions. It runs once per simulation tick with a 1,000-instruction budget. Each tick sets `delta_time`, `collision`, and `collision_count`; `collision_a` and `collision_b` contain the first colliding pair's IDs, or empty text if none. The UI Maker's **2D Game** starter uses this callback to count contacts and apply force to its orb. See `examples/game2d.vk`.
+One `ui_frame2d` / `ui_end_frame2d` block may contain variable updates, math, labels, branches, and `ui_move2d`, `ui_force2d`, or `ui_set_velocity2d` actions. It runs once per simulation tick with a 1,000-instruction budget. Each tick sets `delta_time`, `collision`, `collision_count`, `collision_entered`, and `collision_exited`; the transition flags let a callback react once when contact starts or ends instead of once on every colliding tick. `collision_a` and `collision_b` identify a current or just-ended pair, or are empty when there is no contact event. The UI Maker's **2D Game** starter uses this callback to count contacts and apply force to its orb. See `examples/game2d.vk` and `examples/physics3d.vk`.
 
 ## Script Roles and TCP
 

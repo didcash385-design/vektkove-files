@@ -9,11 +9,11 @@ static int fail(NSString *message) {
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc == 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-V"))) {
-            puts("Vektkove 1.3.2");
+            puts("Vektkove 1.4.0");
             return 0;
         }
         if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
-            puts("Vektkove 1.3.2\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk formats\n       vk keywords\n       vk --version\n\nUI instructions are validated but require the macOS app to display.");
+            puts("Vektkove 1.4.0\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk formats\n       vk keywords\n       vk --version\n\nUI instructions are validated but require the macOS app to display.");
             return 0;
         }
         if (argc == 2 && !strcmp(argv[1], "formats")) { puts(vkc_format_list()); return 0; }
