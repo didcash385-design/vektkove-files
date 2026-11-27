@@ -1,0 +1,77 @@
+name: Versioned WinGet manifest tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.1.0', '1.2.0']
+        platform:
+          - {runner: windows-2025, arch: x64}
+          - {runner: windows-11-arm, arch: arm64}
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - name: Install WinGet when missing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PSResource -Name Microsoft.WinGet.Client -Scope CurrentUser -TrustRepository -Quiet
+            Import-Module Microsoft.WinGet.Client
+            Repair-WinGetPackageManager -Force -Latest
+          }
+          Join-Path $env:LOCALAPPDATA 'Microsoft/WindowsApps' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download version manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ matrix.version }}'
+          $manifest = Join-Path $env:RUNNER_TEMP 'manifest'
+          New-Item -ItemType Directory -Path $manifest -Force | Out-Null
+          $base = "https://raw.githubusercontent.com/didcash385-design/winget-pkgs/vektkove-$version/manifests/v/VCCcash/Vektkove/$version"
+          foreach ($file in @('VCCcash.Vektkove.yaml', 'VCCcash.Vektkove.locale.en-US.yaml', 'VCCcash.Vektkove.installer.yaml')) {
+            Invoke-WebRequest -Uri "$base/$file" -OutFile (Join-Path $manifest $file)
+          }
+      - name: Install with WinGet
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:RUNNER_TEMP 'manifest'
+          winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet is unavailable' }
+          winget settings --enable LocalManifestFiles
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enable local manifests' }
+          $validation = winget validate --manifest $manifest 2>&1 | Out-String
+          $validationExit = $LASTEXITCODE
+          Write-Host $validation
+          if ($validationExit -ne 0 -and $validation -notmatch 'Manifest validation succeeded with warnings') { throw 'Manifest validation failed' }
+          winget install --manifest $manifest --architecture ${{ matrix.platform.arch }} --scope user --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet installation failed' }
+      - name: Test installed command
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ matrix.version }}'
+          $links = Join-Path $env:LOCALAPPDATA 'Microsoft/WinGet/Links'
+          $env:PATH = "$links;$env:PATH"
+          $command = (Get-Command vk.exe -ErrorAction Stop).Source
+          $reported = & $command --version
+          if ($LASTEXITCODE -ne 0 -or $reported -ne "Vektkove $version") { throw 'Installed version check failed' }
+          $source = Join-Path $env:RUNNER_TEMP 'hello.vk'
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/${{ github.repository }}/v$version/examples/hello.vk" -OutFile $source
+          $output = & $command run $source
+          if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -ne "Hello from Vektkove`n5") { throw 'Installed example failed' }
+          $encoded = Join-Path $env:RUNNER_TEMP 'encoded.txt'
+          $decoded = Join-Path $env:RUNNER_TEMP 'decoded.vk'
+          & $command encode zstd+base64 $source $encoded
+          if ($LASTEXITCODE -ne 0) { throw 'Encoding failed' }
+          & $command decode base64+zstd $encoded $decoded
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash $source).Hash -ne (Get-FileHash $decoded).Hash) { throw 'Decoding failed' }
