@@ -1,0 +1,67 @@
+name: Pre-release WinGet tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - {runner: windows-2025, arch: x64}
+          - {runner: windows-11-arm, arch: arm64}
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install WinGet when missing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PSResource -Name Microsoft.WinGet.Client -Scope CurrentUser -TrustRepository -Quiet
+            Import-Module Microsoft.WinGet.Client
+            Repair-WinGetPackageManager -Force -Latest
+          }
+          Join-Path $env:LOCALAPPDATA 'Microsoft/WindowsApps' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Prepare pre-release manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:RUNNER_TEMP 'manifest'
+          New-Item -ItemType Directory -Path $manifest -Force | Out-Null
+          Copy-Item 'winget/1.3.1/*.yaml' $manifest
+          $prefix = Join-Path $env:RUNNER_TEMP 'yaml-parser'
+          npm install --prefix $prefix --no-save --ignore-scripts yaml@2.8.1
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install YAML parser' }
+          $env:NODE_PATH = Join-Path $prefix 'node_modules'
+          $env:MANIFEST_FILE = Join-Path $manifest 'VCCcash.Vektkove.installer.yaml'
+          $env:SOURCE_COMMIT = '${{ github.sha }}'
+          $env:SOURCE_REPOSITORY = '${{ github.repository }}'
+          node -e 'const fs=require("fs"), YAML=require("yaml"); const doc=YAML.parseDocument(fs.readFileSync(process.env.MANIFEST_FILE,"utf8")); if(doc.errors.length) throw doc.errors[0]; for(const installer of doc.get("Installers").items){const arch=installer.get("Architecture"); installer.set("InstallerUrl",`https://raw.githubusercontent.com/${process.env.SOURCE_REPOSITORY}/${process.env.SOURCE_COMMIT}/platforms/windows/${arch}/1.3.1/vektkove-1.3.1-windows-${arch}.zip`)} fs.writeFileSync(process.env.MANIFEST_FILE,String(doc));'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pre-release manifest' }
+      - name: Validate and install
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:RUNNER_TEMP 'manifest'
+          winget settings --enable LocalManifestFiles
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enable local manifests' }
+          $validation = winget validate --manifest $manifest 2>&1 | Out-String
+          $validationExit = $LASTEXITCODE
+          Write-Host $validation
+          if ($validationExit -ne 0 -and $validation -notmatch 'Manifest validation succeeded with warnings') { throw 'Manifest validation failed' }
+          winget install --manifest $manifest --architecture ${{ matrix.platform.arch }} --scope user --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet installation failed' }
+          $links = Join-Path $env:LOCALAPPDATA 'Microsoft/WinGet/Links'
+          $env:PATH = "$links;$env:PATH"
+          $command = (Get-Command vk.exe -ErrorAction Stop).Source
+          $reported = & $command --version
+          if ($LASTEXITCODE -ne 0 -or $reported -ne 'Vektkove 1.3.1') { throw 'Installed version check failed' }
+          node portable/ai_integration_test.mjs - $command
+          if ($LASTEXITCODE -ne 0) { throw 'Installed AI integration failed' }
