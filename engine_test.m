@@ -82,6 +82,10 @@ int main(void) {
         }
         if (!expect(@"set n 12\nsubtract n 2\nmultiply n 3\ndivide n 5\nmodulo n 4\npower n 2\nout $n", @"4\n")) return 5;
         if (!expect(@"text x \"Hi\"\nconcat x \" there\"\nupper x\nout $x\nlower x\nlength x\nout $x", @"HI THERE\n8\n")) return 6;
+        if (!expect(@"text message \"Hello\"\nencode message \"base64\"\nout $message\ndecode message \"base64\"\nout $message", @"SGVsbG8=\nHello\n")) return 70;
+        if (!expect(@"text message \"Hello\"\nencode message \"zstd+base64\"\ndecode message \"base64+zstd\"\nout $message", @"Hello\n")) return 71;
+        NSData *codecList = [VKEngine compile:@"codec_list" error:&error];
+        if (!codecList || ![[VKEngine run:codecList error:&error] containsString:@"base64"]) return 72;
         if (!expect(@"set n 0\nlabel loop\nadd n 1\nset check $n\nless check 3\nif $check loop\nout $n", @"3\n")) return 7;
         if (!expect(@"vk_set n -9\ndo_absolute n\nop_sqrt n\nprint $n", @"3\n")) return 8;
         if (!expect(@"set n 12\nadd n 8\nsubtract n 5\nmultiply n 2\ndivide n 3\nout $n", @"10\n")) return 17;

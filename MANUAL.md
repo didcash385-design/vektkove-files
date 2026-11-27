@@ -1,4 +1,4 @@
-# Vektkove 1.0.0 Manual
+# Vektkove 1.1.0 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -79,6 +79,19 @@ The spellings in the first column are the canonical instructions. Other listed n
 Terminal utilities are interpreter built-ins, not shell execution. `terminal_run "date"` prints the UTC date in `YYYY-MM-DD` form; `terminal_run "pwd"` prints the process working directory; `terminal_run "help"` prints the allowlist. Use `terminal_echo value` for text. Unsupported `terminal_run` keywords return an error.
 
 `cite` formats only the values supplied in the instruction; it does not search for or verify the source. The author, title, and URL must be nonempty text; the year may be text or a number.
+
+### Encoding and Compression
+
+`encode name format` and `decode name format` transform an existing text variable. Use `codec_list` or `vk formats` to list supported formats. Text codecs include Base64, Base64URL, Base32, Base32hex, hexadecimal, Base58, ASCII85, URL, URL form, HTML, quoted-printable, ROT13, ROT47, binary, and JSON string escapes. Compression formats are DEFLATE, zlib, gzip, Zstandard, and LZ4.
+
+```text
+text message "Hello"
+encode message "zstd+base64"
+decode message "base64+zstd"
+out $message
+```
+
+Chains run left to right, so decoding reverses the order. Program variables require UTF-8 output without NUL bytes; use a final text codec such as Base64 when encoding compressed data. The CLI accepts binary data: `vk encode zstd input.bin output.zst` and `vk decode zstd output.zst restored.bin`. Use `-` for standard input or output. Transforms are limited to 16 MiB per stage; Base58 input is limited to 64 KiB. Zstandard and LZ4 dictionaries are not supported. The Zstandard encoder currently writes raw or run-length blocks, so it does not generally compress data.
 
 ### Arithmetic and Math
 

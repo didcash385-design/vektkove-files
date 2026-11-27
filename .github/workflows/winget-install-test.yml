@@ -1,0 +1,88 @@
+name: WinGet manifest install test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            architecture: x64
+          - runner: windows-11-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    steps:
+      - name: Install WinGet when missing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PSResource -Name Microsoft.WinGet.Client -Scope CurrentUser -TrustRepository -Quiet
+            Import-Module Microsoft.WinGet.Client
+            Repair-WinGetPackageManager -Force -Latest
+          }
+          Join-Path $env:LOCALAPPDATA 'Microsoft/WindowsApps' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download the submitted manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:RUNNER_TEMP 'vektkove-manifest'
+          New-Item -ItemType Directory -Path $manifest -Force | Out-Null
+          $base = 'https://raw.githubusercontent.com/didcash385-design/winget-pkgs/vektkove-1.0.0/manifests/v/VCCcash/Vektkove/1.0.0'
+          $files = @('VCCcash.Vektkove.yaml', 'VCCcash.Vektkove.locale.en-US.yaml', 'VCCcash.Vektkove.installer.yaml')
+          foreach ($file in $files) {
+            Invoke-WebRequest -Uri "$base/$file" -OutFile (Join-Path $manifest $file)
+          }
+      - name: Validate and install with WinGet
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:RUNNER_TEMP 'vektkove-manifest'
+          winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet is unavailable' }
+          winget settings --enable LocalManifestFiles
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enable local manifests' }
+          $validation = winget validate --manifest $manifest 2>&1 | Out-String
+          $validationExit = $LASTEXITCODE
+          Write-Host $validation
+          if ($validationExit -ne 0 -and $validation -notmatch 'Manifest validation succeeded with warnings') {
+            throw "WinGet manifest validation failed with exit code $validationExit"
+          }
+          $stdout = Join-Path $env:RUNNER_TEMP 'winget-output.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'winget-errors.txt'
+          $arguments = @('install', '--manifest', "`"$manifest`"", '--architecture', '${{ matrix.architecture }}', '--scope', 'user', '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity', '--verbose-logs')
+          $process = Start-Process -FilePath (Get-Command winget).Source -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'winget|setup|vektkove|\.tmp' } | Select-Object Name, CommandLine | Format-List | Out-String | Write-Host
+            Get-Content $stdout, $stderr -ErrorAction SilentlyContinue | Write-Host
+            $logDir = Join-Path $env:LOCALAPPDATA 'Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir'
+            Get-ChildItem $logDir -Filter 'WinGet-VCCcash*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "Installer log: $($_.FullName)"; Get-Content $_.FullName -Tail 100 | Write-Host }
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'WinGet installation timed out'
+          }
+          Get-Content $stdout, $stderr -ErrorAction SilentlyContinue | Write-Host
+          if ($process.ExitCode -ne 0) { throw "WinGet manifest installation failed: $($process.ExitCode)" }
+      - name: Run installed terminal command
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $links = Join-Path $env:LOCALAPPDATA 'Microsoft/WinGet/Links'
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $env:PATH = "$links;$userPath;$env:PATH"
+          $command = Get-Command vk.exe -ErrorAction Stop
+          Write-Host "Installed command: $($command.Source)"
+          $version = & $command.Source --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne 'Vektkove 1.0.0') { throw 'Installed vk --version failed' }
+          $example = Join-Path $env:RUNNER_TEMP 'hello.vk'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/didcash385-design/Vektkove/v1.0.0/examples/hello.vk' -OutFile $example
+          $output = & $command.Source run $example
+          if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -ne "Hello from Vektkove`n5") { throw 'Installed vk run failed' }
+          Write-Host 'WinGet install and installed vk commands passed.'

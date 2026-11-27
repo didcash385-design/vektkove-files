@@ -2,6 +2,9 @@
  * Compiles .vk source to VK01 bytecode identical to the macOS engine and runs it.
  * Usage: vkport run file.vk|file.vkb | compile file.vk out.vkb | keywords-count
  */
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -11,6 +14,8 @@
 #include <string.h>
 #include <time.h>
 #include <sodium.h>
+#include "vkcodec.h"
+#define VK_VERSION "1.1.0"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
@@ -30,6 +35,7 @@ typedef SOCKET VkSocket;
 #include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
@@ -53,7 +59,8 @@ enum {
     OP_NETLISTENMULTI, OP_NETSENDTO, OP_NETRECEIVEFROM, OP_NETBROADCAST,
     OP_UIPHYSICS2D, OP_UIGRAVITY2D, OP_UIFRAME2D, OP_UIENDFRAME2D, OP_UIMOVE2D, OP_UIFORCE2D, OP_UISETVELOCITY2D, OP_UIFRAMEDATA,
     OP_UIPHYSICS3D, OP_UIGRAVITY3D, OP_UIFRAME3D, OP_UIENDFRAME3D, OP_UIMOVE3D, OP_UIFORCE3D, OP_UISETVELOCITY3D, OP_UIVELOCITY3D,
-    OP_UIMESH3D
+    OP_UIMESH3D,
+    OP_ENCODE, OP_DECODE, OP_CODECLIST
 };
 
 typedef struct { const char *aliases; int opcode; int arity; } Definition;
@@ -118,7 +125,9 @@ static const Definition definitions[] = {
     {"ui_frame3d frame3d game_update3d", OP_UIFRAME3D, 0}, {"ui_end_frame3d end_frame3d game_end_update3d", OP_UIENDFRAME3D, 0},
     {"ui_move3d move3d game_move3d", OP_UIMOVE3D, 4}, {"ui_force3d force3d game_force3d", OP_UIFORCE3D, 4},
     {"ui_set_velocity3d set_velocity3d game_set_velocity3d", OP_UISETVELOCITY3D, 4},
-    {"ui_velocity3d velocity3d game_velocity3d", OP_UIVELOCITY3D, 4}, {"ui_mesh3d", OP_UIMESH3D, 6}
+    {"ui_velocity3d velocity3d game_velocity3d", OP_UIVELOCITY3D, 4}, {"ui_mesh3d", OP_UIMESH3D, 6},
+    {"encode encode_text text_encode", OP_ENCODE, 2}, {"decode decode_text text_decode", OP_DECODE, 2},
+    {"codec_list list_codecs codecs", OP_CODECLIST, 0}
 };
 #define DEFINITION_COUNT (sizeof(definitions) / sizeof(definitions[0]))
 
@@ -1210,6 +1219,12 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             if (output->size > 100000) { snprintf(message, size, "Output limit exceeded."); goto done; }
             continue;
         }
+        if (op == OP_CODECLIST) {
+            const char *listing = vkc_format_list();
+            if (!buffer_append(output, listing, strlen(listing)) || !buffer_append(output, "\n", 1)) goto done;
+            if (output->size > 100000) { snprintf(message, size, "Output limit exceeded."); goto done; }
+            continue;
+        }
         const char *name = ins->operands[0];
         if (!valid_name(name)) { snprintf(message, size, "Invalid variable name."); goto done; }
         Variable *original = find_variable(&variables, name);
@@ -1234,6 +1249,13 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             result.text = copy_text(s, (size_t)(e - s));
         }
         else if (op == OP_CONTAINS) { result.is_number = 1; result.number = operand_text[0] && strstr(original_text, operand_text) != NULL; }
+        else if (op == OP_ENCODE || op == OP_DECODE) {
+            vkc_buf transformed = {0};
+            if (!vkc_transform(op == OP_ENCODE, operand_text, (const uint8_t *)original_text, strlen(original_text), 1, &transformed, message, size)) { free(original_text); free(operand_text); value_clear(&value); goto done; }
+            result.text = malloc(transformed.n + 1);
+            if (result.text) { memcpy(result.text, transformed.p, transformed.n); result.text[transformed.n] = '\0'; }
+            free(transformed.p);
+        }
         else if (op == OP_STARTS) { size_t n = strlen(operand_text); result.is_number = 1; result.number = n && !strncmp(original_text, operand_text, n); }
         else if (op == OP_ENDS) { size_t n = strlen(operand_text), m = strlen(original_text); result.is_number = 1; result.number = n && n <= m && !strcmp(original_text + m - n, operand_text); }
         else if (op == OP_REPLACE) {
@@ -1660,13 +1682,16 @@ static int vk_chat(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     if (argc == 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-V"))) {
-        puts("Vektkove 1.0.0");
+        puts("Vektkove " VK_VERSION);
         return 0;
     }
     if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
-        puts("Vektkove 1.0.0\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk keyword-count\n       vk chat listen|connect address port\n       vk --version\n\nUI instructions are validated but require the macOS app to display.");
+        puts("Vektkove " VK_VERSION "\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk formats\n       vk keyword-count\n       vk chat listen|connect address port\n       vk --version\n\nFORMAT is a codec or a chain such as zstd+base64. UI instructions are validated but require the macOS app to display.");
         return 0;
     }
+    if (argc == 2 && !strcmp(argv[1], "formats")) { puts(vkc_format_list()); return 0; }
+    if (argc >= 3 && argc <= 5 && (!strcmp(argv[1], "encode") || !strcmp(argv[1], "decode")))
+        return vkc_cli(!strcmp(argv[1], "encode"), argv[2], argc > 3 ? argv[3] : NULL, argc > 4 ? argv[4] : NULL);
     if (argc > 1 && !strcmp(argv[1], "chat")) return vk_chat(argc, argv);
     if (argc == 2 && !strcmp(argv[1], "keyword-count")) {
         size_t base = 0;

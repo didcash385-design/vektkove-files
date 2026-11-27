@@ -54,6 +54,10 @@ check 'set a 1\nand a 0\nout $a\nset b 0\nor b 1\nout $b\nset c 0\nnot c\nout $c
 check 'text a "x"\nless a 3'
 check 'text a "x"\nadd a 1'
 # --- text ---
+check 'text s "Hello"\nencode s "base64"\nout $s\ndecode s "base64"\nout $s'
+check 'text s "Hello"\nencode s "zstd+base64"\ndecode s "base64+zstd"\nout $s'
+check 'text s "!!!"\ndecode s "base64"'
+check 'codec_list'
 check 'text x "Hi"\nconcat x " there"\nupper x\nout $x\nlower x\nlength x\nout $x'
 check 'text v "straße"\nupper v\nout $v\ntext w "é😀"\nlength w\nout $w'
 check 'text s "ÀÉÎ"\nlower s\nout $s\ntext u "àéî"\nupper u\nout $u'

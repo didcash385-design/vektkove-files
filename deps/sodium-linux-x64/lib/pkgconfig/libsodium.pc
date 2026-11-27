@@ -1,0 +1,12 @@
+prefix=/var/folders/sz/0sb50n5j23525nvx4pmsk9x40000gn/T/tmp.bJOELMQg/install
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libsodium
+Version: 1.0.20
+Description: A modern and easy-to-use crypto library
+
+Libs: -L${libdir} -lsodium
+Libs.private: -lpthread -pthread 
+Cflags: -I${includedir}

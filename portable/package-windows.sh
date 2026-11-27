@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-VERSION=1.0.0
+VERSION=1.1.0
 portable/build-portable.sh --windows-only
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

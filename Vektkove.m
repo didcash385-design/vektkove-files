@@ -376,6 +376,24 @@ static NSSize VK3DRenderSize(CGFloat viewWidth, CGFloat viewHeight, CGFloat back
     return NSMakeSize(pixelWidth, pixelHeight);
 }
 
+static NSUInteger VKClipNearPlane(const VKVector3 input[3], VKVector3 output[4], double nearPlane) {
+    NSUInteger count = 0;
+    VKVector3 previous = input[2];
+    BOOL previousInside = previous.z >= nearPlane;
+    for (NSUInteger index = 0; index < 3; index++) {
+        VKVector3 current = input[index];
+        BOOL currentInside = current.z >= nearPlane;
+        if (currentInside != previousInside) {
+            double fraction = (nearPlane - previous.z) / (current.z - previous.z);
+            output[count++] = VKVectorAdd(previous, VKVectorScale(VKVectorSubtract(current, previous), fraction));
+        }
+        if (currentInside) output[count++] = current;
+        previous = current;
+        previousInside = currentInside;
+    }
+    return count;
+}
+
 static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat redValue, CGFloat greenValue, CGFloat blueValue,
                                 NSUInteger pixelWidth, NSUInteger pixelHeight,
                                 CGFloat viewWidth, CGFloat viewHeight,
@@ -675,7 +693,9 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
                 VKVector3 relative = VKVectorSubtract(world[i], camera);
                 view[i] = VKVectorMake(VKVectorDot(relative, right), VKVectorDot(relative, up), VKVectorDot(relative, forward));
             }
-            if (view[0].z <= 0.1 || view[1].z <= 0.1 || view[2].z <= 0.1) continue;
+            VKVector3 clipped[4];
+            NSUInteger clippedCount = VKClipNearPlane(view, clipped, 0.1);
+            if (clippedCount < 3) continue;
             VKVector3 normal = VKVectorNormalize(VKVectorCross(VKVectorSubtract(world[1], world[0]), VKVectorSubtract(world[2], world[0])));
             VKVector3 center = VKVectorScale(VKVectorAdd(VKVectorAdd(world[0], world[1]), world[2]), 1.0 / 3.0);
             CGFloat illumination = 0.22, specular = 0;
@@ -692,14 +712,17 @@ static void VKRasterizeTriangle(NSPoint points[3], double depths[3], CGFloat red
             }
             illumination = MIN(1, illumination);
             specular = MIN(0.4, specular);
-            NSPoint points[3];
-            for (NSUInteger i = 0; i < 3; i++) points[i] = NSMakePoint(self.bounds.size.width * 0.5 + view[i].x * focalLength / view[i].z, self.bounds.size.height * 0.5 - view[i].y * focalLength / view[i].z);
-            double depths[3] = {view[0].z, view[1].z, view[2].z};
-            VKRasterizeTriangle(points, depths,
-                                rgb.redComponent * illumination + specular,
-                                rgb.greenComponent * illumination + specular,
-                                rgb.blueComponent * illumination + specular,
-                                pixelWidth, pixelHeight, viewWidth, viewHeight, pixels, depthBuffer);
+            for (NSUInteger corner = 1; corner + 1 < clippedCount; corner++) {
+                VKVector3 projected[] = {clipped[0], clipped[corner], clipped[corner + 1]};
+                NSPoint points[3];
+                for (NSUInteger i = 0; i < 3; i++) points[i] = NSMakePoint(viewWidth * 0.5 + projected[i].x * focalLength / projected[i].z, viewHeight * 0.5 - projected[i].y * focalLength / projected[i].z);
+                double depths[3] = {projected[0].z, projected[1].z, projected[2].z};
+                VKRasterizeTriangle(points, depths,
+                                    rgb.redComponent * illumination + specular,
+                                    rgb.greenComponent * illumination + specular,
+                                    rgb.blueComponent * illumination + specular,
+                                    pixelWidth, pixelHeight, viewWidth, viewHeight, pixels, depthBuffer);
+            }
         }
     }
     unsigned char *planes[5] = {pixels, NULL, NULL, NULL, NULL};
@@ -1125,7 +1148,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.0.0";
+    self.window.title = @"Vektkove 1.1.0";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1276,7 +1299,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:VKLicenseText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.0.0",
+        NSAboutPanelOptionApplicationVersion: @"1.1.0",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -2667,6 +2690,11 @@ int main(int argc, const char *argv[]) {
             if (stlTestTriangles.count != 1) { NSLog(@"STL import self-test: %@", stlTestError); return 101; }
             NSSize normalRenderSize = VK3DRenderSize(640, 480, 2);
             NSSize largeRenderSize = VK3DRenderSize(10000, 10000, 2);
+            VKVector3 crossing[] = {VKVectorMake(-1, 0, 0.05), VKVectorMake(1, 0, 1), VKVectorMake(0, 1, 1)};
+            VKVector3 clipped[4];
+            NSUInteger clippedCount = VKClipNearPlane(crossing, clipped, 0.1);
+            if (clippedCount != 4) return 102;
+            for (NSUInteger corner = 0; corner < clippedCount; corner++) if (clipped[corner].z < 0.1 - 1e-9) return 103;
             NSUInteger largePixelCount = (NSUInteger)largeRenderSize.width * (NSUInteger)largeRenderSize.height;
             if (!NSEqualSizes(normalRenderSize, NSMakeSize(1280, 960)) ||
                 largePixelCount * (4 + sizeof(float)) > (NSUInteger)2000 * 1024 * 1024 ||
