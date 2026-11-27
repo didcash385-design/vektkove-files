@@ -8,6 +8,18 @@ Vektkove is a custom programming language and native Mac editor. `.vk` source is
 
 The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.4.0. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
+Download the archive for your operating system and CPU from the [1.4.0 release](https://github.com/didcash385-design/vektkove-files/releases/tag/v1.4.0). Extract the macOS archive to open `Vektkove.app` and `VektkoveLauncher.app`. Choose x64 for Intel Macs or arm64 for Apple Silicon.
+
+For Ubuntu and other Linux distributions, choose the x64 archive for Intel/AMD or arm64 for AArch64 systems, extract it, and run:
+
+```sh
+tar -xzf vektkove-1.4.0-linux-x64.tar.gz
+./vk --version
+./vk run examples/hello.vk
+```
+
+Replace `linux-x64` with `linux-arm64` for ARM64. These are statically linked Linux command-line builds; they do not include the graphical editor or render 2D/3D windows. AI commands additionally require `curl` and a configured model service.
+
 ## Start
 
 On an Intel or Apple Silicon Mac running macOS 11 or newer, open `Vektkove.app`. Use **Open Folder** to show your project's files in the left explorer; expand folders and select a text file to edit it. Use the file-plus and folder-plus icons to create items in the selected folder, and the refresh icon to pick up external changes. Hover over an icon to see its name. Existing files are not overwritten. The editor can save `.vk` programs, compile `.vkb` bytecode, and build native windows.
