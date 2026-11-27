@@ -1,0 +1,15 @@
+set speed 2
+import ui
+window "Coded 3D" 760 560
+ui_scene3d 20 20 720 500
+ui_camera3d 0 0 14
+ui_light3d 4 7 9 1000
+ui_box3d 0 0 0 2 2 2 "#F15B40"
+ui_id "cube"
+ui_sphere3d -3 0 0 1 "#38A6D8"
+ui_frame3d
+set distance $delta_time
+multiply distance $speed
+ui_move3d "cube" $distance 0 0
+ui_end_frame3d
+halt

@@ -1195,7 +1195,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.2.0";
+    self.window.title = @"Vektkove 1.3.0";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1349,7 +1349,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.2.0",
+        NSAboutPanelOptionApplicationVersion: @"1.3.0",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -2342,7 +2342,8 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSString *title = [type isEqualToString:@"label"] ? @"New label" : [type isEqualToString:@"input"] ? @"Enter text" : @"Click me";
     NSUInteger number = self.elements.count + 1;
     NSString *identifier = [self uniqueBuilderID:[NSString stringWithFormat:@"%@%lu", type, (unsigned long)number]];
-    [self.elements addObject:[@{@"type":type, @"text":title, @"id":identifier, @"bind":@"", @"x":@"20", @"y":[NSString stringWithFormat:@"%lu", (unsigned long)(20 + self.elements.count * 45)], @"width":@"180", @"height":@"30", @"message":@"Hello!", @"color":@"#DCE7F5"} mutableCopy]];
+    CGFloat y = MIN(MAX(0, self.builderHeight.doubleValue - 30), 20 + self.elements.count * 45.0);
+    [self.elements addObject:[@{@"type":type, @"text":title, @"id":identifier, @"bind":@"", @"x":@"20", @"y":[NSString stringWithFormat:@"%.0f", y], @"width":@"180", @"height":@"30", @"message":@"Hello!", @"color":@"#DCE7F5"} mutableCopy]];
     [self.table reloadData];
     [self.table selectRowIndexes:[NSIndexSet indexSetWithIndex:self.elements.count - 1] byExtendingSelection:NO];
     [self refreshDesignerCanvas];
@@ -2353,7 +2354,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
 - (void)add3DShape:(NSPopUpButton *)picker {
     NSInteger selected = picker.indexOfSelectedItem;
     NSArray *types = @[@"box3d", @"sphere3d", @"cylinder3d", @"cone3d", @"torus3d", @"plane3d"];
-    if (selected < 1 || selected > (NSInteger)types.count || self.elements.count >= 198) return;
+    if (selected < 1 || selected > (NSInteger)types.count) return;
     NSString *type = types[(NSUInteger)selected - 1];
     NSString *identifier = [self uniqueBuilderID:type];
     CGFloat x = MAX(0, (self.builderWidth.doubleValue - 64) / 2);
@@ -2365,7 +2366,6 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [picker selectItemAtIndex:0];
 }
 - (BOOL)addImportedModelAtURL:(NSURL *)url error:(NSString **)error {
-    if (self.elements.count >= 198) { if (error) *error = @"The UI element limit has been reached."; return NO; }
     if (!VKImportMesh(url, error)) return NO;
     NSString *identifier = [self uniqueBuilderID:@"model3d"];
     CGFloat x = MAX(0, (self.builderWidth.doubleValue - 64) / 2);
@@ -2395,7 +2395,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
 - (void)duplicateElement:(id)sender {
     (void)sender;
     NSInteger row = self.table.selectedRow;
-    if (row < 0 || row >= (NSInteger)self.elements.count || self.elements.count >= 200) return;
+    if (row < 0 || row >= (NSInteger)self.elements.count) return;
     NSMutableDictionary *copy = [self.elements[(NSUInteger)row] mutableCopy];
     copy[@"id"] = [self uniqueBuilderID:[NSString stringWithFormat:@"%@_copy", copy[@"id"]]];
     CGFloat offset = self.designerCanvas.snapsToGrid ? self.designerCanvas.gridSize : 8;
@@ -3114,6 +3114,22 @@ int main(int argc, const char *argv[]) {
             [task waitUntilExit];
             if (task.terminationStatus == 0 || ![result containsString:@"Compile error: Line 1:"]) return 23;
             [[NSFileManager defaultManager] removeItemAtURL:project error:nil];
+            [delegate.elements removeAllObjects];
+            for (NSUInteger index = 0; index < 200; index++) {
+                [delegate.elements addObject:[@{@"type":@"label", @"text":@"Item", @"id":[NSString stringWithFormat:@"item%lu", (unsigned long)index], @"bind":@"", @"x":@"0", @"y":@"0", @"width":@"10", @"height":@"10", @"message":@"", @"color":@"#FFFFFF"} mutableCopy]];
+            }
+            [delegate.table reloadData];
+            [delegate.table selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+            [delegate duplicateElement:nil];
+            if (delegate.elements.count != 201) return 106;
+            NSPopUpButton *shapePicker = [[NSPopUpButton alloc] init];
+            [shapePicker addItemsWithTitles:@[@"Choose", @"Box"]];
+            [shapePicker selectItemAtIndex:1];
+            [delegate add3DShape:shapePicker];
+            if (delegate.elements.count != 202) return 107;
+            NSData *largeBuilderCode = [VKEngine compile:[delegate builderSource] error:&error];
+            NSMutableArray *largeBuilderUI = [NSMutableArray array];
+            if (!largeBuilderCode || ![VKEngine run:largeBuilderCode ui:largeBuilderUI error:&error]) { NSLog(@"Large UI Maker design failed: %@", error); return 108; }
             printf("Native UI builder self-test passed\n");
             return 0;
         }

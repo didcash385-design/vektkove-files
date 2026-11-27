@@ -15,11 +15,13 @@ check() {
   ./vk compile "$WORK/p.vk" "$WORK/mac.vkb" 2> "$WORK/mac.cerr"; mac_c=$?
   "$PORT" compile "$WORK/p.vk" "$WORK/port.vkb" 2> "$WORK/port.cerr"; port_c=$?
   if [ "$mac_c" != "$port_c" ]; then echo "FAIL #$n compile status differs ($mac_c vs $port_c): $1"; fail=$((fail + 1)); return; fi
+  if [ "${2:-}" = success ] && [ "$mac_c" != 0 ]; then echo "FAIL #$n expected compilation to succeed"; fail=$((fail + 1)); return; fi
   if [ "$mac_c" = 0 ]; then
     if ! cmp -s "$WORK/mac.vkb" "$WORK/port.vkb"; then echo "FAIL #$n bytecode differs: $1"; fail=$((fail + 1)); return; fi
     ./vk run "$WORK/mac.vkb" > "$WORK/mac.out" 2> "$WORK/mac.err"; mac_r=$?
     "$PORT" run "$WORK/mac.vkb" > "$WORK/port.out" 2> "$WORK/port.err"; port_r=$?
     if [ "$mac_r" != "$port_r" ]; then echo "FAIL #$n run status differs ($mac_r vs $port_r): $1"; fail=$((fail + 1)); return; fi
+    if [ "${2:-}" = success ] && [ "$mac_r" != 0 ]; then echo "FAIL #$n expected execution to succeed: $(head -1 "$WORK/mac.err")"; fail=$((fail + 1)); return; fi
     if ! cmp -s "$WORK/mac.out" "$WORK/port.out"; then echo "FAIL #$n output differs: $1"; echo "  mac : $(head -c 300 "$WORK/mac.out" | tr '\n' '|')"; echo "  port: $(head -c 300 "$WORK/port.out" | tr '\n' '|')"; fail=$((fail + 1)); return; fi
     if [ "$mac_r" != 0 ] && [ "$(head -1 "$WORK/mac.err")" != "$(head -1 "$WORK/port.err")" ]; then echo "FAIL #$n error text differs: $1"; echo "  mac : $(head -1 "$WORK/mac.err")"; echo "  port: $(head -1 "$WORK/port.err")"; fail=$((fail + 1)); return; fi
   fi
@@ -54,6 +56,17 @@ check 'set a 1\nand a 0\nout $a\nset b 0\nor b 1\nout $b\nset c 0\nnot c\nout $c
 check 'text a "x"\nless a 3'
 check 'text a "x"\nadd a 1'
 # --- text ---
+large_ui='text shared "value"\nimport ui\nwindow "Many" 100 100\n'
+large_3d='import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\n'
+large_2d='import ui\nwindow "2D" 100 100\nui_scene2d 0 0 100 100\n'
+for ((index = 0; index < 220; index++)); do
+  large_ui+="ui_label \"Item\" 0 0 1 1\nui_id \"item$index\"\nui_bind \"item$index\" shared\n"
+  large_3d+="ui_box3d 0 0 0 1 1 1 \"#FF0000\"\nui_id \"box$index\"\n"
+  large_2d+="ui_rect2d \"rect$index\" 0 0 1 1 \"#FF0000\"\n"
+done
+check "$large_ui" success
+check "$large_3d" success
+check "$large_2d" success
 check 'text s "Hello"\nencode s "base64"\nout $s\ndecode s "base64"\nout $s'
 check 'text s "Hello"\nencode s "zstd+base64"\ndecode s "base64+zstd"\nout $s'
 check 'text s "!!!"\ndecode s "base64"'

@@ -23,7 +23,7 @@ jobs:
           archive="$RUNNER_TEMP/vektkove.tar.gz"
           package="$RUNNER_TEMP/vektkove"
           mkdir -p "$package"
-          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v1.2.0/vektkove-1.2.0-macos-${{ matrix.arch }}.tar.gz" -o "$archive"
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v1.3.0/vektkove-1.3.0-macos-${{ matrix.arch }}.tar.gz" -o "$archive"
           tar -xzf "$archive" -C "$package"
           "$package/Vektkove.app/Contents/MacOS/Vektkove" --self-test
           "$package/VektkoveLauncher.app/Contents/MacOS/VektkoveLauncher" --self-test

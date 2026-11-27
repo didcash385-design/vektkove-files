@@ -767,7 +767,6 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
     NSMutableArray<VKTCPChannel *> *networkClients = [NSMutableArray array];
     BOOL sawScene3D = NO, sawCamera3D = NO, sawScene2D = NO, sawFrame2D = NO, sawGravity2D = NO, sawFrame3D = NO, sawGravity3D = NO;
     NSMutableSet<NSString *> *scene2DIDs = [NSMutableSet set];
-    NSUInteger uiElements = 0, uiMetadata = 0;
     NSUInteger steps = 0;
     for (NSUInteger index = 0; index < instructions.count; index++) {
         if (++steps > 100000) { if (error) *error = @"Execution limit exceeded."; return nil; }
@@ -925,7 +924,6 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             continue;
         }
         if (opcode == VKUIID) {
-            if (uiMetadata >= 400) { if (error) *error = @"UI metadata limit exceeded."; return nil; }
             NSString *runtimeError = nil;
             id identifier = valueOf(operands[0], variables, &runtimeError);
             if (runtimeError) { if (error) *error = runtimeError; return nil; }
@@ -938,11 +936,9 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             [uiIDs addObject:identifier];
             uiIDTypes[identifier] = @(previousUI);
             [ui addObject:@[@(opcode), @[identifier]]];
-            uiMetadata++;
             continue;
         }
         if (opcode == VKUIBind) {
-            if (uiMetadata >= 400) { if (error) *error = @"UI metadata limit exceeded."; return nil; }
             NSString *runtimeError = nil;
             id identifier = valueOf(operands[0], variables, &runtimeError);
             if (runtimeError) { if (error) *error = runtimeError; return nil; }
@@ -954,7 +950,6 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 return nil;
             }
             [ui addObject:@[@(opcode), @[identifier, name, [value description]]]];
-            uiMetadata++;
             continue;
         }
         if (opcode >= VKUIScene3D && opcode <= VKUISpin3D) {
@@ -976,9 +971,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                     }
                 }
                 if ([values[2] doubleValue] < 1 || [values[3] doubleValue] < 1) { if (error) *error = @"3D viewport dimensions must be positive."; return nil; }
-                if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
                 [ui addObject:@[@(opcode), values]];
-                uiElements++;
                 sawScene3D = YES;
                 previousUI = opcode;
                 continue;
@@ -994,9 +987,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                     if (error) *error = @"ui_spin3d needs a 3D object id and duration from 0.1 to 3600 seconds.";
                     return nil;
                 }
-                if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
                 [ui addObject:@[@(opcode), @[identifier, duration]]];
-                uiElements++;
                 previousUI = opcode;
                 continue;
             }
@@ -1028,9 +1019,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 NSRegularExpression *hex = [NSRegularExpression regularExpressionWithPattern:@"^#[0-9A-Fa-f]{6}$" options:0 error:nil];
                 if (!color || [hex numberOfMatchesInString:color options:0 range:NSMakeRange(0, color.length)] != 1) { if (error) *error = @"3D primitive color must use #RRGGBB."; return nil; }
             }
-            if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
             [ui addObject:@[@(opcode), values]];
-            uiElements++;
             if (opcode == VKUICamera3D) sawCamera3D = YES;
             if (opcodeIs3DPrimitive(opcode)) previousUI = opcode;
             continue;
@@ -1120,9 +1109,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 if (error) *error = @"3D callback actions must be inside ui_frame3d.";
                 return nil;
             }
-            if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
             [ui addObject:@[@(opcode), values]];
-            uiElements++;
             continue;
         }
         if (opcodeIs2DGameInstruction(opcode)) {
@@ -1182,9 +1169,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 if (error) *error = @"2D callback actions must be inside ui_frame2d.";
                 return nil;
             }
-            if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
             [ui addObject:@[@(opcode), values]];
-            uiElements++;
             if (opcode == VKUIScene2D || opcode == VKUIRect2D || opcode == VKUICircle2D) previousUI = opcode;
             continue;
         }
@@ -1228,9 +1213,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 }
                 values[start] = instrument;
             }
-            if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
             [ui addObject:@[@(opcode), values]];
-            uiElements++;
             previousUI = opcode;
             continue;
         }
@@ -1261,10 +1244,8 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             }
             NSUInteger sizeStart = opcode == VKWindow ? 1 : 3;
             if ([values[sizeStart] doubleValue] < 1 || [values[sizeStart + 1] doubleValue] < 1) { if (error) *error = @"UI widths and heights must be positive."; return nil; }
-            if (uiElements >= 200) { if (error) *error = @"UI element limit exceeded."; return nil; }
             if (opcode != VKWindow) [values addObject:uiColor];
             [ui addObject:@[@(opcode), values]];
-            uiElements++;
             previousUI = opcode;
             continue;
         }

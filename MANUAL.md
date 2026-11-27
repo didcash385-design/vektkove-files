@@ -1,4 +1,4 @@
-# Vektkove 1.2.0 Manual
+# Vektkove 1.3.0 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -252,7 +252,7 @@ halt
 
 ## 3D Rendering
 
-Vektkove includes CPU 3D renderers inside a native, resizable viewport. Select Basic for the original Vektkove rasterizer or Regular for the adapted Mini3D rasterizer by Linwei (skywind3000), distributed under the MIT license. The selection applies to the current viewport. A program can create one 3D viewport per window. Coordinates are centered on the scene origin and use Vektkove world units; viewport coordinates and size use window points. Add `import ui` before any UI instruction and `window` before the scene.
+Vektkove includes CPU 3D renderers inside a native, resizable viewport. Write 3D instructions directly in the editor or a `.vk` file, then use **Test Code** in the macOS app to render them. `examples/scene3d.vk` shows the default shapes, and `examples/code3d.vk` moves a shape from a per-frame script. Select Basic for the original Vektkove rasterizer or Regular for the adapted Mini3D rasterizer by Linwei (skywind3000), distributed under the MIT license. The selection applies to the current viewport. A program can create one 3D viewport per window. Coordinates are centered on the scene origin and use Vektkove world units; viewport coordinates and size use window points. Add `import ui` before any UI instruction and `window` before the scene.
 
 ```text
 import ui
@@ -268,9 +268,9 @@ ui_cylinder3d -3 0 0 0.8 2 "#54B87A"
 halt
 ```
 
-The software pipeline transforms and perspective-projects triangles, rasterizes them with a depth buffer, and shades them with ambient, distance-attenuated point, and specular lighting. Sphere and torus meshes use higher tessellation for smoother silhouettes. Rendering is Retina-aware and caps each frame's color and depth buffers together at 2,000 MiB; actual use scales with viewport size. Each rendered dimension is capped at 16,384 pixels. Scene instructions are also subject to the 200 UI element limit. This per-frame buffer ceiling does not limit mesh storage, system graphics allocations, multiple viewports, or total app memory. The viewport supports interactive camera orbit, pan (hold Shift while dragging), and scroll zoom. If no camera is specified, a camera at `(0, 0, 12)` is used. A custom camera may be positioned once per scene and looks at the origin. One automatic fill light is present; add point lights with a nonnegative intensity from 0 through 10,000 for more control.
+The software pipeline transforms and perspective-projects triangles, rasterizes them with a depth buffer, and shades them with ambient, distance-attenuated point, and specular lighting. Sphere and torus meshes use higher tessellation for smoother silhouettes. Rendering is Retina-aware and caps each frame's color and depth buffers together at 2,000 MiB; actual use scales with viewport size. Each rendered dimension is capped at 16,384 pixels. This per-frame buffer ceiling does not limit mesh storage, system graphics allocations, multiple viewports, or total app memory. The viewport supports interactive camera orbit, pan (hold Shift while dragging), and scroll zoom. If no camera is specified, a camera at `(0, 0, 12)` is used. A custom camera may be positioned once per scene and looks at the origin. One automatic fill light is present; add point lights with a nonnegative intensity from 0 through 10,000 for more control.
 
-The available meshes are box, sphere, cylinder, cone, torus, and plane. Give each a position, positive dimensions/radii, and a quoted `#RRGGBB` material color. Coordinates range from -10,000 through 10,000. A `ui_id` immediately after a mesh assigns its unique ID; `ui_spin3d` uses that ID and a rotation period from 0.1 through 3,600 seconds. 3D scenes and meshes count toward the 200 UI element limit.
+The available meshes are box, sphere, cylinder, cone, torus, and plane. Give each a position, positive dimensions/radii, and a quoted `#RRGGBB` material color. Coordinates range from -10,000 through 10,000. A `ui_id` immediately after a mesh assigns its unique ID; `ui_spin3d` uses that ID and a rotation period from 0.1 through 3,600 seconds.
 
 **Import 3D Model** in UI Maker loads local model geometry through macOS Model I/O. OBJ and STL imports are tested; the formats available can vary by macOS version. Models are limited to 32 MiB per source file and 100,000 triangles, centered and scaled to fit two world units before the selected scale is applied. Imported meshes use the chosen solid color; textures, materials, animation, and skeletons are not rendered. The generated `ui_mesh3d` instruction retains the original file path, so that file must remain available when the program is run. Relative paths in authored source are resolved against the source file's directory.
 
@@ -321,7 +321,7 @@ The `vkport` portable runner supports a separate, reduced language implementatio
 
 ## Limits and Errors
 
-The interpreter stops after 100,000 executed instructions, limits output to 100,000 characters, and limits a UI program to 200 UI records, including its window. A UI program can therefore contain at most 199 other controls and actions combined. Programs report errors for malformed or truncated bytecode, invalid operands, undefined variables or labels, invalid variable names, division by zero, non-finite numeric results, invalid UI values, and exceeded limits.
+The interpreter stops after 100,000 executed instructions and limits output to 100,000 characters. There is no fixed UI element or metadata count, but available memory and the instruction budget still limit practical scene sizes. Programs report errors for malformed or truncated bytecode, invalid operands, undefined variables or labels, invalid variable names, division by zero, non-finite numeric results, invalid UI values, and exceeded limits.
 
 Use the **Manual** tab for command help. The engine's `diagnose` facility also reports unknown instructions, wrong operand counts, duplicate or unused labels, undefined variables, some UI ordering mistakes, and unreachable code. Diagnostics are advisory for some runtime-dependent conditions; **Test Code** remains the final check for a program.
 

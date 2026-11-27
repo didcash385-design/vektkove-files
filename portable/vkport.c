@@ -15,7 +15,7 @@
 #include <time.h>
 #include <sodium.h>
 #include "vkcodec.h"
-#define VK_VERSION "1.2.0"
+#define VK_VERSION "1.3.0"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
@@ -651,9 +651,23 @@ static char *vk_game_receive_message(VkSocket socket) {
     return text;
 }
 
+static int grow_ui_ids(char ***ids, int **types, size_t *capacity, size_t count) {
+    if (count < *capacity) return 1;
+    if (*capacity > SIZE_MAX / 2 / sizeof(**ids)) return 0;
+    size_t next = *capacity ? *capacity * 2 : 32;
+    char **grown_ids = realloc(*ids, next * sizeof(**ids));
+    if (!grown_ids) return 0;
+    *ids = grown_ids;
+    int *grown_types = realloc(*types, next * sizeof(**types));
+    if (!grown_types) return 0;
+    *types = grown_types;
+    *capacity = next;
+    return 1;
+}
+
 static int run_bytecode(const unsigned char *data, size_t length, Buffer *output, char *message, size_t size, size_t *ui_total) {
-    Instruction *code = NULL; size_t count = 0, ui_count = 0, ui_metadata_count = 0; int last_ui_op = 0;
-    char *ui_ids[200] = {0}; int ui_id_types[200] = {0}; size_t ui_id_count = 0; int imported_ui = 0;
+    Instruction *code = NULL; size_t count = 0, ui_count = 0; int last_ui_op = 0;
+    char **ui_ids = NULL; int *ui_id_types = NULL; size_t ui_id_count = 0, ui_id_capacity = 0; int imported_ui = 0;
     int has_scene3d = 0, has_camera3d = 0, has_scene2d = 0, has_frame2d = 0, has_frame3d = 0, has_gravity2d = 0, has_gravity3d = 0;
     int script_role = 0;
     VkSocket network_socket = VK_INVALID_SOCKET;
@@ -829,11 +843,11 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             if (ui_count == 0) { snprintf(message, size, "Create a window before using UI ids or bindings."); goto done; }
             if (op == OP_UIID) {
                 if (!((last_ui_op >= OP_UILABEL && last_ui_op <= OP_UIINPUT) || (last_ui_op >= OP_UIBOX3D && last_ui_op <= OP_UIPLANE3D) || last_ui_op == OP_UIMESH3D)) { snprintf(message, size, "ui_id needs a unique nonempty id after a control or 3D object."); goto done; }
-                if (ui_id_count >= 200 || ui_metadata_count >= 400) { snprintf(message, size, "UI metadata limit exceeded."); goto done; }
                 Value identifier = {0};
                 if (!resolve(ins->operands[0], &variables, &identifier, message, size)) goto done;
                 if (identifier.is_number || !identifier.text || !identifier.text[0]) { value_clear(&identifier); snprintf(message, size, "ui_id needs a unique nonempty id after a control or 3D object."); goto done; }
                 for (size_t id = 0; id < ui_id_count; id++) if (!strcmp(ui_ids[id], identifier.text)) { value_clear(&identifier); snprintf(message, size, "ui_id needs a unique nonempty id after a control or 3D object."); goto done; }
+                if (!grow_ui_ids(&ui_ids, &ui_id_types, &ui_id_capacity, ui_id_count)) { value_clear(&identifier); goto done; }
                 ui_ids[ui_id_count] = identifier.text;
                 ui_id_types[ui_id_count++] = last_ui_op;
                 identifier.text = NULL;
@@ -845,10 +859,8 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                 while (id < ui_id_count && (identifier.is_number || strcmp(ui_ids[id], identifier.text ? identifier.text : ""))) id++;
                 value_clear(&identifier);
                 if (id == ui_id_count || (ui_id_types[id] != OP_UILABEL && ui_id_types[id] != OP_UIINPUT) || !find_variable(&variables, ins->operands[1])) { snprintf(message, size, "ui_bind needs an existing label or input id and defined variable name."); goto done; }
-                if (ui_metadata_count >= 400) { snprintf(message, size, "UI metadata limit exceeded."); goto done; }
                 last_ui_op = OP_UIBIND;
             }
-            ui_metadata_count++;
             continue;
         }
         if (op >= OP_UISCENE3D && op <= OP_UISPIN3D) {
@@ -901,7 +913,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                     if (op == OP_UICAMERA3D) has_camera3d = 1;
                 }
             }
-            if (ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); goto done; }
             ui_count++;
             last_ui_op = op;
             continue;
@@ -934,11 +945,12 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                     int valid_color = good && !parts[ins->count - 1].is_number && color && strlen(color) == 7 && color[0] == '#';
                     for (size_t digit = 1; valid_color && digit < 7; digit++) if (!isxdigit((unsigned char)color[digit])) valid_color = 0;
                     if (good && !valid_color) { snprintf(message, size, "2D object color must use #RRGGBB."); good = 0; }
-                    if (good && ui_id_count < 200) {
+                    if (good && !grow_ui_ids(&ui_ids, &ui_id_types, &ui_id_capacity, ui_id_count)) good = 0;
+                    if (good) {
                         ui_ids[ui_id_count] = identifier->text;
                         ui_id_types[ui_id_count++] = op;
                         identifier->text = NULL;
-                    } else if (good) { snprintf(message, size, "UI element limit exceeded."); good = 0; }
+                    }
                 } else {
                     Value *identifier = &parts[0];
                     size_t id = 0;
@@ -952,7 +964,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                 for (size_t k = 0; k < ins->count; k++) value_clear(&parts[k]);
                 if (!good) goto done;
             }
-            if (ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); goto done; }
             ui_count++;
             last_ui_op = op;
             continue;
@@ -1028,7 +1039,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             } else { snprintf(message, size, "2D callback actions must be inside ui_frame2d."); good = 0; }
             for (size_t k = 0; k < ins->count; k++) value_clear(&parts[k]);
             if (!good) goto done;
-            if (ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); goto done; }
             ui_count++;
             last_ui_op = op;
             continue;
@@ -1045,7 +1055,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             for (size_t part = 1; part <= 4 && good; part++) if (!parts[part].is_number || fabs(parts[part].number) > 10000 || (part == 4 && parts[part].number <= 0)) { snprintf(message, size, "ui_mesh3d needs numeric coordinates and a positive scale up to 10000."); good = 0; }
             for (size_t part = 0; part < 6; part++) value_clear(&parts[part]);
             if (!good) goto done;
-            if (ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); goto done; }
             ui_count++;
             last_ui_op = op;
             continue;
@@ -1072,7 +1081,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             } else { snprintf(message, size, "3D callback actions must be inside ui_frame3d."); good = 0; }
             for (size_t k = 0; k < ins->count; k++) value_clear(&parts[k]);
             if (!good) goto done;
-            if (ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); goto done; }
             ui_count++;
             last_ui_op = op;
             continue;
@@ -1112,7 +1120,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                 if (!named || !parts[s + 1].is_number || parts[s + 1].number < 0 || parts[s + 1].number > 127 || floor(parts[s + 1].number) != parts[s + 1].number ||
                         !parts[s + 2].is_number || parts[s + 2].number < 0.05 || parts[s + 2].number > 10) { snprintf(message, size, "Use piano or guitar, MIDI note 0 to 127, and duration 0.05 to 10 seconds."); good = 0; }
             }
-            if (good && ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); good = 0; }
             for (size_t k = 0; k < ins->count; k++) value_clear(&parts[k]);
             if (!good) goto done;
             ui_count++; last_ui_op = op;
@@ -1131,7 +1138,6 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             }
             size_t size_start = op == OP_WINDOW ? 1 : 3;
             if (good && (parts[size_start].number < 1 || parts[size_start + 1].number < 1)) { snprintf(message, size, "UI widths and heights must be positive."); good = 0; }
-            if (good && ui_count >= 200) { snprintf(message, size, "UI element limit exceeded."); good = 0; }
             for (size_t k = 0; k < ins->count; k++) value_clear(&parts[k]);
             if (!good) goto done;
             ui_count++; last_ui_op = op;
@@ -1319,6 +1325,8 @@ done:
 #endif
     if (!ok && !message[0]) snprintf(message, size, "Out of memory.");
     for (size_t id = 0; id < ui_id_count; id++) free(ui_ids[id]);
+    free(ui_ids);
+    free(ui_id_types);
     for (size_t i = 0; i < variables.count; i++) { free(variables.items[i].name); value_clear(&variables.items[i].value); }
     free(variables.items);
     release_instructions(code, count);

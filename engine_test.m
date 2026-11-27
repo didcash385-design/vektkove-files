@@ -86,6 +86,13 @@ int main(void) {
         if (!expect(@"text message \"Hello\"\nencode message \"zstd+base64\"\ndecode message \"base64+zstd\"\nout $message", @"Hello\n")) return 71;
         NSData *codecList = [VKEngine compile:@"codec_list" error:&error];
         if (!codecList || ![[VKEngine run:codecList error:&error] containsString:@"base64"]) return 72;
+        NSMutableString *largeSource = [NSMutableString stringWithString:@"text shared \"value\"\nimport ui\nwindow \"Many controls\" 100 100\n"];
+        for (NSUInteger index = 0; index < 220; index++) {
+            [largeSource appendFormat:@"ui_label \"Item\" 0 0 1 1\nui_id \"item%lu\"\nui_bind \"item%lu\" shared\n", (unsigned long)index, (unsigned long)index];
+        }
+        NSMutableArray *largeUI = [NSMutableArray array];
+        NSData *largeCode = [VKEngine compile:largeSource error:&error];
+        if (!largeCode || ![VKEngine run:largeCode ui:largeUI error:&error] || largeUI.count != 661) { NSLog(@"Large UI failed: %@", error); return 73; }
         if (!expect(@"set n 0\nlabel loop\nadd n 1\nset check $n\nless check 3\nif $check loop\nout $n", @"3\n")) return 7;
         if (!expect(@"vk_set n -9\ndo_absolute n\nop_sqrt n\nprint $n", @"3\n")) return 8;
         if (!expect(@"set n 12\nadd n 8\nsubtract n 5\nmultiply n 2\ndivide n 3\nout $n", @"10\n")) return 17;

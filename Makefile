@@ -52,6 +52,8 @@ test: all engine_test
 	./vk run /tmp/vektkove-test.vkb
 	./vk compile examples/scene3d.vk /tmp/vektkove-scene3d-test.vkb
 	./vk run /tmp/vektkove-scene3d-test.vkb
+	./vk compile examples/code3d.vk /tmp/vektkove-code3d-test.vkb
+	./vk run /tmp/vektkove-code3d-test.vkb
 	./vk compile examples/game2d.vk /tmp/vektkove-game2d-test.vkb
 	./vk run /tmp/vektkove-game2d-test.vkb
 	./vk compile examples/server.vk /tmp/vektkove-server-test.vkb

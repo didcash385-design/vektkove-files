@@ -1,12 +1,12 @@
 Read the [complete Vektkove manual](MANUAL.md) for editor, language, UI Maker, command-line, and VKLINK instructions. The editor and launcher follow the Mac's light or dark appearance. Use **A-** and **A+**, or the View menu, to adjust code and output text size. Select the **Manual** tab to search command names, filter by Code, Logic, Math, Text, or UI, sort command spellings A-Z or group them by category, and page through all results.
 To rebuild, install Apple Command Line Tools and run `make` in this folder. Run `make test` for the interpreter, native UI, and command-line checks. The build contains both x86_64 and arm64 macOS slices. Tests run on the host architecture.
-# Vektkove 1.2.0
+# Vektkove 1.3.0
 
 Vektkove is a custom, deterministic programming language and native Mac editor. It does not use AI, JavaScript, Node.js, or an external runtime. `.vk` source is compiled to Vektkove's `VK01` bytecode and executed by its interpreter.
 
 ## Versioned Files
 
-The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0, 1.1.0, and 1.2.0. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
+The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.3.0. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
 ## Start
 
@@ -69,7 +69,7 @@ Use the ordinary arithmetic instructions with a variable and numeric operand, fo
 | `is_number`, `is_text`, `empty` | name | Replace the variable with a type or emptiness check. |
 | `trim`, `contains`, `starts_with`, `ends_with`, `replace` | name and values | Trim, inspect, or replace text. See the Manual tab for operands. |
 
-The interpreter limits programs to 100,000 instructions, output to 100,000 characters, and UI to 200 elements. Division by zero, invalid operations, and missing variables or labels report errors.
+The interpreter limits programs to 100,000 executed instructions and output to 100,000 characters. There is no fixed UI element limit, though available memory and the execution limit still apply. Division by zero, invalid operations, and missing variables or labels report errors.
 
 ## Encoding and Compression
 
@@ -96,4 +96,4 @@ To compare the portable runner with the macOS engine, `portable/difftest.sh` and
 
 Open **UI Maker** in the app. Choose one of 20 starter layouts or add labels, input fields, and buttons. Drag an object to move it, or drag its bottom-right corner to resize it. The canvas grid snaps positions and sizes by default; change its spacing or turn snapping off. Duplicate the selected control, edit its ID and binding variable in the table, and set its color with the color well. **Draw** immediately applies generated source to the editor and opens a live line-numbered view. **Apply Code** remains available from the maker toolbar. Import startup sounds and preview the design. UI source begins with `import ui`. Buttons display messages and can insert input text using `{input}` or an input's placeholder in braces. See [MANUAL.md](MANUAL.md) for the complete instructions.
 
-For native 3D scenes, see `examples/scene3d.vk`. Select Basic for Vektkove's original rasterizer or Regular for the Mini3D-based rasterizer by Linwei (MIT license). Both support camera orbit, Shift-drag pan, scroll zoom, point lights, primitive meshes, and continuous object rotation. See [third_party/mini3d/LICENSE](third_party/mini3d/LICENSE).
+For native 3D scenes, write `.vk` source directly or use UI Maker; see `examples/scene3d.vk` and `examples/code3d.vk`. Select Basic for Vektkove's original rasterizer or Regular for the Mini3D-based rasterizer by Linwei (MIT license). Both support camera orbit, Shift-drag pan, scroll zoom, point lights, primitive meshes, and continuous object rotation. See [third_party/mini3d/LICENSE](third_party/mini3d/LICENSE).
