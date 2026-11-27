@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #import "VKEngine.h"
+#include "portable/vkai.h"
 #define VEKTKOVE_MINI3D
 #include "third_party/mini3d/mini3d.c"
 
@@ -1410,7 +1411,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.4.1";
+    self.window.title = @"Vektkove 1.4.2";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1440,6 +1441,10 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     smaller.toolTip = @"Decrease code text size"; larger.toolTip = @"Increase code text size";
     smaller.autoresizingMask = larger.autoresizingMask = NSViewMinYMargin;
     [content addSubview:smaller]; [content addSubview:larger];
+    NSButton *aiCode = button(@"AI Code", NSMakeRect(964, 670, 112, 30), self, @selector(generateAICode:));
+    aiCode.toolTip = @"Generate Vektkove code with an AI provider";
+    aiCode.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin;
+    [content addSubview:aiCode];
     self.projectLabel = [NSTextField labelWithString:@"EXPLORER"];
     self.projectLabel.frame = NSMakeRect(24, 606, 205, 16);
     self.projectLabel.font = [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightSemibold];
@@ -1569,7 +1574,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.4.1",
+        NSAboutPanelOptionApplicationVersion: @"1.4.2",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -1952,6 +1957,79 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
 }
 - (void)newProjectFile:(id)sender { (void)sender; [self createProjectItemIsFolder:NO]; }
 - (void)newProjectFolder:(id)sender { (void)sender; [self createProjectItemIsFolder:YES]; }
+- (void)openAIKeyPage:(id)sender {
+    (void)sender;
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://platform.openai.com/api-keys"]];
+}
+- (void)generateAICode:(id)sender {
+    (void)sender;
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Generate Vektkove Code";
+    alert.informativeText = @"Your request is sent to the selected provider. Review generated code before using it.";
+    [alert addButtonWithTitle:@"Generate"];
+    [alert addButtonWithTitle:@"Cancel"];
+    NSView *form = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 154)];
+    NSPopUpButton *backend = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 120, 130, 26) pullsDown:NO];
+    [backend addItemsWithTitles:@[@"OpenAI", @"Ollama"]];
+    NSTextField *model = field(@"gpt-4o-mini", NSMakeRect(142, 120, 278, 26));
+    model.placeholderString = @"Model name";
+    NSTextField *request = field(@"", NSMakeRect(0, 82, 420, 26));
+    request.placeholderString = @"Describe the Vektkove program";
+    NSSecureTextField *key = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(0, 44, 288, 26)];
+    key.placeholderString = @"API key (or OPENAI_API_KEY)";
+    NSButton *keyLink = button(@"Get API Key", NSMakeRect(295, 44, 125, 26), self, @selector(openAIKeyPage:));
+    [form addSubview:backend]; [form addSubview:model]; [form addSubview:request]; [form addSubview:key]; [form addSubview:keyLink];
+    alert.accessoryView = form;
+    if ([alert runModal] != NSAlertFirstButtonReturn) return;
+    NSString *question = [request.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *modelName = [model.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *backendName = backend.indexOfSelectedItem == 0 ? @"openai" : @"ollama";
+    if (!question.length || !modelName.length) { self.output.string = @"Enter a request and model name."; return; }
+    char *secret = strdup(key.stringValue.UTF8String);
+    key.stringValue = @"";
+    if (!secret) { self.output.string = @"Could not prepare AI request."; return; }
+    NSString *original = [self.editor.string copy];
+    NSString *prompt = [NSString stringWithFormat:@"Write a complete Vektkove .vk program for: %@\nReturn only source code, no markdown. One instruction per line. Use set name value, text name \"text\", out $name, and halt. Variables are read with $. Use import ui before window and UI commands.", question];
+    self.output.string = @"Generating code...";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        VKAIContext context; vk_ai_init(&context);
+        char error[1024] = {0};
+        int ready = vk_ai_configure(&context, backendName.UTF8String, modelName.UTF8String, error, sizeof(error)) && vk_ai_set_api_key(&context, secret, error, sizeof(error));
+        volatile char *wipe = secret;
+        for (size_t index = 0, length = strlen(secret); index < length; index++) wipe[index] = 0;
+        free(secret);
+        char *answer = ready ? vk_ai_ask(&context, prompt.UTF8String, error, sizeof(error)) : NULL;
+        NSString *generated = answer ? [NSString stringWithUTF8String:answer] : nil;
+        NSString *failure = answer ? nil : [NSString stringWithUTF8String:error];
+        free(answer);
+        vk_ai_destroy(&context);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!generated.length) { self.output.string = failure ?: @"AI returned an empty response."; return; }
+            NSString *compileError = nil;
+            NSData *compiled = [VKEngine compile:generated error:&compileError];
+            if (!compiled) { self.output.string = [NSString stringWithFormat:@"Generated code did not compile: %@\n\n%@", compileError, generated]; return; }
+            if (![self.editor.string isEqualToString:original]) { self.output.string = [@"The editor changed while generating; code was not applied.\n\n" stringByAppendingString:generated]; return; }
+            NSAlert *review = [[NSAlert alloc] init];
+            review.messageText = @"Review Generated Code";
+            review.informativeText = @"The source compiled. Review it before replacing the editor contents.";
+            [review addButtonWithTitle:@"Replace Code"];
+            [review addButtonWithTitle:@"Cancel"];
+            NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 520, 260)];
+            scroll.hasVerticalScroller = YES;
+            NSTextView *preview = [[NSTextView alloc] initWithFrame:scroll.bounds];
+            preview.editable = NO;
+            preview.string = generated;
+            preview.font = [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
+            scroll.documentView = preview;
+            review.accessoryView = scroll;
+            if ([review runModal] == NSAlertFirstButtonReturn && [self.editor.string isEqualToString:original]) {
+                self.editor.string = generated;
+                self.window.documentEdited = ![self.editor.string isEqualToString:self.savedSource];
+                self.output.string = @"Generated code inserted. Review it before running.";
+            }
+        });
+    });
+}
 - (void)compileFile:(id)sender {
     (void)sender;
     NSString *error = nil;
@@ -3061,6 +3139,11 @@ int main(int argc, const char *argv[]) {
                 if (![[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:snapshotPath atomically:YES]) return 28;
             }
             NSTextView *readableView = delegate.launcherMode ? delegate.output : delegate.editor;
+            if (!delegate.launcherMode) {
+                BOOL hasAIButton = NO;
+                for (NSView *view in delegate.window.contentView.subviews) if ([view isKindOfClass:NSButton.class] && ((NSButton *)view).action == @selector(generateAICode:)) hasAIButton = YES;
+                if (!hasAIButton) return 132;
+            }
             for (NSAppearanceName name in @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]) {
                 NSAppearance *appearance = [NSAppearance appearanceNamed:name];
                 if (contrast(readableView.textColor, readableView.backgroundColor, appearance) < 4.5) return 26;

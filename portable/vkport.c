@@ -16,7 +16,7 @@
 #include <sodium.h>
 #include "vkcodec.h"
 #include "vkai.h"
-#define VK_VERSION "1.4.1"
+#define VK_VERSION "1.4.2"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
@@ -131,8 +131,8 @@ static const Definition definitions[] = {
     {"ui_velocity3d velocity3d game_velocity3d", OP_UIVELOCITY3D, 4}, {"ui_mesh3d", OP_UIMESH3D, 6},
     {"encode encode_text text_encode", OP_ENCODE, 2}, {"decode decode_text text_decode", OP_DECODE, 2},
     {"codec_list list_codecs codecs", OP_CODECLIST, 0},
-    {"ai_config ai_configure", OP_AICONFIGURE, 2}, {"train ai_train", OP_TRAIN, 2},
-    {"ai_clear clear_knowledge", OP_AICLEAR, 0}, {"ai_ask ask_ai", OP_AIASK, 2},
+    {"ai_config ai_configure ai_setup", OP_AICONFIGURE, 2}, {"train ai_train ai_learn ai_remember", OP_TRAIN, 2},
+    {"ai_clear clear_knowledge ai_forget", OP_AICLEAR, 0}, {"ai_ask ask_ai ai_query", OP_AIASK, 2},
     {"ui_keymove3d keymove3d game_keymove3d", OP_UIKEYMOVE3D, 5},
     {"ui_voxel3d", OP_UIVOXEL3D, 4}, {"ui_voxel_controls3d", OP_UIVOXELCONTROLS3D, 2},
     {"ui_remove3d", OP_UIREMOVE3D, 1}
@@ -1272,7 +1272,28 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                 snprintf(message, size, "AI command operands must be text.");
                 good = 0;
             }
-            if (good) good = op == OP_AICONFIGURE
+            if (good && op == OP_TRAIN && !strcmp(first.text, "synthetic")) {
+                VKAIContext generated; vk_ai_init(&generated);
+                for (unsigned index = 0; index < 3 && good; index++) {
+                    char source[256]; Buffer training = {0};
+                    good = vk_ai_synthetic_source(second.text, index, source, sizeof(source), message, size);
+                    if (good) good = compile_source(source, strlen(source), &training, message, size);
+                    char *tree = good ? vk_ai_code_tree(training.data, training.size, source, message, size) : NULL;
+                    if (good) good = tree && vk_ai_add_text(&generated, "synthetic", tree, message, size);
+                    free(tree); free(training.data);
+                }
+                if (good) good = vk_ai_add_text(&ai_context, "synthetic", generated.knowledge, message, size);
+                vk_ai_destroy(&generated);
+            } else if (good && op == OP_TRAIN && (!strcmp(first.text, "code") || (!strcmp(first.text, "file") && strlen(second.text) >= 3 && !strcmp(second.text + strlen(second.text) - 3, ".vk")))) {
+                char *file_source = !strcmp(first.text, "file") ? vk_ai_read_file(second.text, message, size) : NULL;
+                if (!strcmp(first.text, "file") && !file_source) good = 0;
+                const char *source = file_source ? file_source : second.text;
+                Buffer training = {0};
+                if (good && !compile_source(source, strlen(source), &training, message, size)) { snprintf(message, size, "Training code failed syntax checking."); good = 0; }
+                char *tree = good ? vk_ai_code_tree(training.data, training.size, source, message, size) : NULL;
+                if (good) good = tree && vk_ai_add_text(&ai_context, "code", tree, message, size);
+                free(tree); free(training.data); free(file_source);
+            } else if (good) good = op == OP_AICONFIGURE
                 ? vk_ai_configure(&ai_context, first.text, second.text, message, size)
                 : vk_ai_train(&ai_context, first.text, second.text, message, size);
             value_clear(&first); value_clear(&second);
@@ -1752,7 +1773,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
-        puts("Vektkove " VK_VERSION "\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk formats\n       vk keyword-count\n       vk chat listen|connect address port\n       vk --version\n\nFORMAT is a codec or a chain such as zstd+base64. UI instructions are validated but require the macOS app to display.");
+        puts("Vektkove " VK_VERSION "\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk check file.vk\n       vk ast file.vk\n       vk score file.vk\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk formats\n       vk keyword-count\n       vk chat listen|connect address port\n       vk --version\n\nFORMAT is a codec or a chain such as zstd+base64. UI instructions are validated but require the macOS app to display.");
         return 0;
     }
     if (argc == 2 && !strcmp(argv[1], "formats")) { puts(vkc_format_list()); return 0; }
@@ -1769,7 +1790,7 @@ int main(int argc, char **argv) {
         printf("%zu\n", base);
         return 0;
     }
-    if ((argc != 3 || strcmp(argv[1], "run")) && (argc != 4 || strcmp(argv[1], "compile"))) { fprintf(stderr, "Usage: vkport run file.vk|file.vkb | vkport compile file.vk out.vkb | vkport keyword-count\n"); return 1; }
+    if ((argc != 3 || (strcmp(argv[1], "run") && strcmp(argv[1], "check") && strcmp(argv[1], "ast") && strcmp(argv[1], "score"))) && (argc != 4 || strcmp(argv[1], "compile"))) { fprintf(stderr, "Usage: vkport run file.vk|file.vkb | vkport compile file.vk out.vkb | vkport check file.vk | vkport ast file.vk | vkport score file.vk | vkport keyword-count\n"); return 1; }
     Buffer input = {0}; char message[512] = "";
     if (!read_file(argv[2], &input)) return 1;
     Buffer bytecode = {0};
@@ -1777,9 +1798,21 @@ int main(int argc, char **argv) {
     if (dot && !strcmp(dot, ".vkb") && !strcmp(argv[1], "run")) { bytecode = input; input.data = NULL; }
     else {
         if (!valid_utf8(input.data ? input.data : (const unsigned char *)"", input.size)) { fprintf(stderr, "Source must be UTF-8 text.\n"); return 1; }
-        if (!compile_source((const char *)input.data, input.size, &bytecode, message, sizeof(message))) { fprintf(stderr, "%s\n", message); free(input.data); free(bytecode.data); return 1; }
+        if (!compile_source((const char *)input.data, input.size, &bytecode, message, sizeof(message))) {
+            if (!strcmp(argv[1], "score")) { free(input.data); free(bytecode.data); puts("0"); return 0; }
+            fprintf(stderr, "%s\n", message); free(input.data); free(bytecode.data); return 1;
+        }
+    }
+    if (!strcmp(argv[1], "score")) { free(input.data); free(bytecode.data); puts("1"); return 0; }
+    if (!strcmp(argv[1], "ast")) {
+        char *source = copy_text((const char *)(input.data ? input.data : (const unsigned char *)""), input.size);
+        char *tree = source ? vk_ai_code_tree(bytecode.data, bytecode.size, source, message, sizeof(message)) : NULL;
+        free(source); free(input.data); free(bytecode.data);
+        if (!tree) { fprintf(stderr, "%s\n", message[0] ? message : "Out of memory."); return 1; }
+        puts(tree); free(tree); return 0;
     }
     free(input.data);
+    if (!strcmp(argv[1], "check")) { free(bytecode.data); puts("Syntax OK"); return 0; }
     if (!strcmp(argv[1], "compile")) {
         FILE *file = fopen(argv[3], "wb");
         int ok = file && fwrite(bytecode.data, 1, bytecode.size, file) == bytecode.size && fclose(file) == 0;

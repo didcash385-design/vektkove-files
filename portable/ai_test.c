@@ -37,6 +37,8 @@ int main(void) {
         if (!answer || strcmp(answer, "Ollama answer")) { fprintf(stderr, "%s\n", error); free(answer); return 12; }
         free(answer);
         if (!vk_ai_configure(&context, "openai", "example", error, sizeof(error))) return 13;
+        if (!vk_ai_set_api_key(&context, "test-key", error, sizeof(error))) return 20;
+        if (vk_ai_set_api_key(&context, "invalid\nkey", error, sizeof(error))) return 21;
         answer = vk_ai_ask(&context, "What is solar power?", error, sizeof(error));
         if (!answer || strcmp(answer, "OpenAI answer")) { fprintf(stderr, "%s\n", error); free(answer); return 14; }
         free(answer);

@@ -34,7 +34,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $manifest = Join-Path $env:RUNNER_TEMP 'manifest'
           New-Item -ItemType Directory -Path $manifest -Force | Out-Null
-          Copy-Item 'winget/1.4.1/*.yaml' $manifest
+          Copy-Item 'winget/1.4.2/*.yaml' $manifest
           $prefix = Join-Path $env:RUNNER_TEMP 'yaml-parser'
           npm install --prefix $prefix --no-save --ignore-scripts yaml@2.8.1
           if ($LASTEXITCODE -ne 0) { throw 'Could not install YAML parser' }
@@ -42,7 +42,7 @@ jobs:
           $env:MANIFEST_FILE = Join-Path $manifest 'VCCcash.Vektkove.installer.yaml'
           $env:SOURCE_COMMIT = '${{ github.sha }}'
           $env:SOURCE_REPOSITORY = '${{ github.repository }}'
-          node -e 'const fs=require("fs"), YAML=require("yaml"); const doc=YAML.parseDocument(fs.readFileSync(process.env.MANIFEST_FILE,"utf8")); if(doc.errors.length) throw doc.errors[0]; for(const installer of doc.get("Installers").items){const arch=installer.get("Architecture"); installer.set("InstallerUrl",`https://raw.githubusercontent.com/${process.env.SOURCE_REPOSITORY}/${process.env.SOURCE_COMMIT}/platforms/windows/${arch}/1.4.1/vektkove-1.4.1-windows-${arch}.zip`)} fs.writeFileSync(process.env.MANIFEST_FILE,String(doc));'
+          node -e 'const fs=require("fs"), YAML=require("yaml"); const doc=YAML.parseDocument(fs.readFileSync(process.env.MANIFEST_FILE,"utf8")); if(doc.errors.length) throw doc.errors[0]; for(const installer of doc.get("Installers").items){const arch=installer.get("Architecture"); installer.set("InstallerUrl",`https://raw.githubusercontent.com/${process.env.SOURCE_REPOSITORY}/${process.env.SOURCE_COMMIT}/platforms/windows/${arch}/1.4.2/vektkove-1.4.2-windows-${arch}.zip`)} fs.writeFileSync(process.env.MANIFEST_FILE,String(doc));'
           if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pre-release manifest' }
       - name: Validate and install
         shell: pwsh
@@ -62,6 +62,6 @@ jobs:
           $env:PATH = "$links;$env:PATH"
           $command = (Get-Command vk.exe -ErrorAction Stop).Source
           $reported = & $command --version
-          if ($LASTEXITCODE -ne 0 -or $reported -ne 'Vektkove 1.4.1') { throw 'Installed version check failed' }
+          if ($LASTEXITCODE -ne 0 -or $reported -ne 'Vektkove 1.4.2') { throw 'Installed version check failed' }
           node portable/ai_integration_test.mjs - $command
           if ($LASTEXITCODE -ne 0) { throw 'Installed AI integration failed' }

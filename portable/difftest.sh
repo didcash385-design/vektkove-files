@@ -80,6 +80,9 @@ check 'train "invalid" "data"'
 check 'train "text" ""'
 check 'ai_ask answer "question"'
 check 'ai_config "ollama" "model"\nai_clear' success
+check 'ai_learn "code" "set value 2\\nout $value\\nhalt"\nai_remember "synthetic" "seed"\nai_forget' success
+check 'train "code" "not_a_command"'
+check 'train "synthetic" ""'
 check 'text x "Hi"\nconcat x " there"\nupper x\nout $x\nlower x\nlength x\nout $x'
 check 'text v "straße"\nupper v\nout $v\ntext w "é😀"\nlength w\nout $w'
 check 'text s "ÀÉÎ"\nlower s\nout $s\ntext u "àéî"\nupper u\nout $u'

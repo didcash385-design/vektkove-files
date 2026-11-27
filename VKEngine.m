@@ -271,10 +271,10 @@ static NSDictionary *commandTable(void) {
             @[@(VKEncode), @2, @"encode encode_text text_encode"],
             @[@(VKDecode), @2, @"decode decode_text text_decode"],
             @[@(VKCodecList), @0, @"codec_list list_codecs codecs"],
-            @[@(VKAIConfigure), @2, @"ai_config ai_configure"],
-            @[@(VKTrain), @2, @"train ai_train"],
-            @[@(VKAIClear), @0, @"ai_clear clear_knowledge"],
-            @[@(VKAIAsk), @2, @"ai_ask ask_ai"],
+            @[@(VKAIConfigure), @2, @"ai_config ai_configure ai_setup"],
+            @[@(VKTrain), @2, @"train ai_train ai_learn ai_remember"],
+            @[@(VKAIClear), @0, @"ai_clear clear_knowledge ai_forget"],
+            @[@(VKAIAsk), @2, @"ai_ask ask_ai ai_query"],
             @[@(VKUIKeyMove3D), @5, @"ui_keymove3d keymove3d game_keymove3d"],
             @[@(VKUIVoxel3D), @4, @"ui_voxel3d"],
             @[@(VKUIVoxelControls3D), @2, @"ui_voxel_controls3d"],
@@ -495,7 +495,7 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             @(VKDecode): @"name format - Decode the variable's text from base64, hex, base64+gzip, base64+zstd, and other formats; the result must be UTF-8 text.",
             @(VKCodecList): @"- List every supported encoding and compression format.",
             @(VKAIConfigure): @"backend model - Select the ollama or openai backend and model.",
-            @(VKTrain): @"source value - Add knowledge from text, file, HTTPS URL, or a Wikipedia topic.",
+            @(VKTrain): @"source value - Add text, file, URL, topic, compiled code, or synthetic examples.",
             @(VKAIClear): @"- Clear the current program's AI knowledge.",
             @(VKAIAsk): @"name question - Ask the configured AI and store its answer in name.",
             @(VKUIKeyMove3D): @"id key dx dy dz - Move a named 3D object when a key is pressed.",
@@ -1388,7 +1388,34 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 return nil;
             }
             char message[1024] = {0};
-            int ok = opcode == VKAIConfigure
+            int ok;
+            if (opcode == VKTrain && [first isEqualToString:@"synthetic"]) {
+                VKAIContext generated; vk_ai_init(&generated);
+                ok = 1;
+                for (unsigned index = 0; index < 3 && ok; index++) {
+                    char source[256];
+                    ok = vk_ai_synthetic_source([second UTF8String], index, source, sizeof(source), message, sizeof(message));
+                    NSString *compileError = nil;
+                    NSData *trainingCode = ok ? [VKEngine compile:[NSString stringWithUTF8String:source] error:&compileError] : nil;
+                    if (ok && !trainingCode) { snprintf(message, sizeof(message), "%s", compileError.UTF8String); ok = 0; }
+                    char *tree = ok ? vk_ai_code_tree(trainingCode.bytes, trainingCode.length, source, message, sizeof(message)) : NULL;
+                    if (ok) ok = tree && vk_ai_add_text(&generated, "synthetic", tree, message, sizeof(message));
+                    free(tree);
+                }
+                if (ok) ok = vk_ai_add_text(&aiState->context, "synthetic", generated.knowledge, message, sizeof(message));
+                vk_ai_destroy(&generated);
+            } else if (opcode == VKTrain && ([first isEqualToString:@"code"] || ([first isEqualToString:@"file"] && [[second pathExtension] isEqualToString:@"vk"]))) {
+                char *fileSource = [first isEqualToString:@"file"] ? vk_ai_read_file([second UTF8String], message, sizeof(message)) : NULL;
+                if ([first isEqualToString:@"file"] && !fileSource) { if (error) *error = [NSString stringWithUTF8String:message]; return nil; }
+                NSString *source = fileSource ? [NSString stringWithUTF8String:fileSource] : second;
+                NSString *compileError = nil;
+                NSData *trainingCode = [VKEngine compile:source error:&compileError];
+                if (!trainingCode) { free(fileSource); if (error) *error = @"Training code failed syntax checking."; return nil; }
+                char *tree = vk_ai_code_tree(trainingCode.bytes, trainingCode.length, source.UTF8String, message, sizeof(message));
+                free(fileSource);
+                ok = tree && vk_ai_add_text(&aiState->context, "code", tree, message, sizeof(message));
+                free(tree);
+            } else ok = opcode == VKAIConfigure
                 ? vk_ai_configure(&aiState->context, [first UTF8String], [second UTF8String], message, sizeof(message))
                 : vk_ai_train(&aiState->context, [first UTF8String], [second UTF8String], message, sizeof(message));
             if (!ok) { if (error) *error = [NSString stringWithUTF8String:message]; return nil; }

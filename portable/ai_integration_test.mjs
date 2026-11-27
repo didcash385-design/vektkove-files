@@ -35,6 +35,12 @@ const server = createServer((request, response) => {
         if (payload.model !== 'example' || payload.stream !== false || !prompt.includes('Online reference content.') ||
             !prompt.includes('Solar energy comes from sunlight.') || !prompt.includes('File reference content.') ||
             !prompt.includes('Quoted "reference".')) throw new Error('Unexpected request body');
+        if (prompt.includes('[code]\n')) {
+          const records = prompt.split('\n').filter(line => line.startsWith('{"instructions"')).map(line => JSON.parse(line));
+          if (records.length !== 5 || records.some(record => record.format !== 'vektkove-instruction-tree-v1' || record.syntax_reward !== 1) ||
+              !records.some(record => record.source.includes('out $value'))) throw new Error('Invalid code training records');
+          seen.add('code-training');
+        }
         if (url.pathname === '/openai' && request.headers.authorization !== 'Bearer test-key') throw new Error('Missing authorization');
         if (url.pathname === '/ollama' && request.headers.authorization) throw new Error('Unexpected authorization');
         seen.add(url.pathname.slice(1));
@@ -54,6 +60,8 @@ const directory = await mkdtemp(join(tmpdir(), 'vektkove-ai-'));
 try {
   const file = join(directory, 'reference.txt');
   await writeFile(file, 'File reference content.');
+  const codeFile = join(directory, 'training.vk');
+  await writeFile(codeFile, 'set value 4\nout $value\nhalt\n');
   const base = `http://127.0.0.1:${server.address().port}`;
   const env = { ...process.env, VEKTKOVE_AI_TEST_PAGE: `${base}/page`, VEKTKOVE_AI_TEST_FILE: file,
     VEKTKOVE_WIKIPEDIA_URL: `${base}/wiki`, VEKTKOVE_OLLAMA_URL: `${base}/ollama`,
@@ -67,7 +75,7 @@ try {
     child.on('close', code => resolve({ code, stdout, stderr }));
   });
   if (binary !== '-') {
-    const unit = await execute(binary, []);
+    const unit = await execute(binary, [], { OPENAI_API_KEY: '' });
     if (unit.code !== 0) throw new Error(`AI integration failed: exit ${unit.code}: ${unit.stderr}`);
   }
   if (engines.length) {
@@ -78,6 +86,9 @@ try {
       `train "url" ${JSON.stringify(`${base}/page`)}`,
       `train "file" ${JSON.stringify(file)}`,
       'train "text" "Quoted \\"reference\\".\\nAnother line."',
+      'ai_learn "code" "set value 2\\nout $value\\nhalt"',
+      `train "file" ${JSON.stringify(codeFile)}`,
+      'ai_remember "synthetic" "sample seed"',
       'ai_ask answer "What is solar power?"',
       'out $answer',
       'ai_config "openai" "example"',
@@ -88,6 +99,15 @@ try {
     let bytecode;
     for (const [index, engine] of engines.entries()) {
       const compiled = join(directory, `program-${index}.vkb`);
+      const check = await execute(engine, ['check', source]);
+      const score = await execute(engine, ['score', source]);
+      const ast = await execute(engine, ['ast', source]);
+      if (check.code !== 0 || check.stdout.trim() !== 'Syntax OK' || score.code !== 0 || score.stdout.trim() !== '1' || ast.code !== 0) throw new Error('Code analysis failed');
+      const tree = JSON.parse(ast.stdout);
+      if (tree.format !== 'vektkove-instruction-tree-v1' || tree.syntax_reward !== 1 || !tree.instructions.length || !tree.source.includes('ai_remember')) throw new Error('Invalid AST export');
+      const invalid = await execute(engine, ['score', file]);
+      const invalidCheck = await execute(engine, ['check', file]);
+      if (invalid.code !== 0 || invalid.stdout.trim() !== '0' || invalidCheck.code === 0) throw new Error('Invalid source score failed');
       const compile = await execute(engine, ['compile', source, compiled]);
       if (compile.code !== 0) throw new Error(`AI program compile failed: ${compile.stderr}`);
       const current = await readFile(compiled);
@@ -113,7 +133,7 @@ try {
       }
     }
   }
-  if (['page', 'topic', 'ollama', 'openai'].some(name => !seen.has(name))) {
+  if (['page', 'topic', 'ollama', 'openai', ...(engines.length ? ['code-training'] : [])].some(name => !seen.has(name))) {
     throw new Error(`AI integration did not exercise every endpoint: ${[...seen].join(', ')}`);
   }
   console.log('AI local mock integration passed');

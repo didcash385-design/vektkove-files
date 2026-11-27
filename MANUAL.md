@@ -1,4 +1,4 @@
-# Vektkove 1.4.1 Manual
+# Vektkove 1.4.2 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -85,10 +85,10 @@ Terminal utilities are interpreter built-ins, not shell execution. `terminal_run
 
 | Instruction | Operands | Behavior |
 | --- | --- | --- |
-| `ai_config` | backend model | Select `ollama` or `openai` and the model name. |
-| `train` | source value | Add UTF-8 reference text from `text`, `file`, `url`, or a Wikipedia `topic`. |
-| `ai_ask` | name question | Ask the configured model and store its answer in a text variable. |
-| `ai_clear` | none | Clear the current program's reference data. |
+| `ai_config` | backend model | Select `ollama` or `openai` and the model name. Aliases: `ai_configure`, `ai_setup`. |
+| `train` | source value | Add reference text or compiler-checked code examples. Aliases: `ai_train`, `ai_learn`, `ai_remember`. |
+| `ai_ask` | name question | Ask the configured model and store its answer in a text variable. Aliases: `ask_ai`, `ai_query`. |
+| `ai_clear` | none | Clear the current program's reference data. Aliases: `clear_knowledge`, `ai_forget`. |
 
 ### AI Questions and Knowledge
 
@@ -103,6 +103,12 @@ out $answer
 ```
 
 `train "topic" "solar power"` searches English Wikipedia and adds up to three introductory extracts. `train "url" "https://example.com/page"` adds the returned UTF-8 text, including any HTML markup. `train "file" "notes.txt"` reads a local UTF-8 text, CSV, or JSON file as text; relative paths use the process working directory. `train "text" value` adds the supplied text or text variable. See `examples/ai.vk` for a complete program.
+
+`train "code" value` compiles Vektkove source and adds its JSON instruction tree and original source to the current reference data. `train "file" "program.vk"` does the same automatically for a `.vk` file; other file types are added as plain text. `train "synthetic" "seed"` deterministically generates three simple arithmetic programs, compiles each, and adds their trees. A tree includes bytecode opcode numbers, operand tokens with lexical categories, and `syntax_reward: 1`; these categories are not inferred runtime types. Training code that fails compilation is rejected. The compiler checks syntax and UI import ordering, not program correctness, runtime behavior, or safety.
+
+Use `vk check program.vk` to check syntax without running it, `vk ast program.vk` to print the instruction tree as JSON, and `vk score program.vk` to print `1` for source accepted by the compiler or `0` for rejected source. I/O and encoding failures return an error instead of a score. These are preparation and scoring tools for an external training pipeline, not reinforcement learning, fine-tuning, or a model-weight update. Synthetic examples are fixed arithmetic templates, not a general-purpose dataset generator.
+
+In the macOS editor, **AI Code** opens a dialog for a request, provider, model, and optional masked API key. The key can be obtained from [OpenAI's API keys page](https://platform.openai.com/api-keys); usage may incur provider charges. The key entered in the dialog is used for that request and is not saved in the `.vk` file. Alternatively, leave it empty to use `OPENAI_API_KEY`; for Ollama choose an installed local model. The request is sent to the selected provider without the current editor contents. The response is compiled, then shown for review before replacing the editor. Compilation is not a security review; inspect generated code before running it. If the editor changes during generation, the result is shown in output instead of replacing it.
 
 Install `curl` on Linux or macOS and make it available on PATH; Windows uses the system `curl.exe`. The `ollama` backend requires Ollama running locally with the selected model already installed. The default endpoint is `http://127.0.0.1:11434/api/chat`; `VEKTKOVE_OLLAMA_URL` can override it. The `openai` backend requires `OPENAI_API_KEY` in the process environment and defaults to `https://api.openai.com/v1/chat/completions`; `VEKTKOVE_OPENAI_URL` can select an OpenAI-compatible endpoint. Choose a model available to the selected service. HTTPS is required except for explicit localhost or 127.0.0.1 HTTP endpoints. `VEKTKOVE_WIKIPEDIA_URL` can override the Wikipedia API base URL.
 

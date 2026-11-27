@@ -1,6 +1,8 @@
 ai_config "ollama" "llama3.2"
 train "topic" "solar power"
 train "text" "My project uses solar panels."
+train "code" "set value 2\nadd value 3\nout $value\nhalt"
+train "synthetic" "arithmetic examples"
 ai_ask answer "How do solar panels work?"
 out $answer
 halt

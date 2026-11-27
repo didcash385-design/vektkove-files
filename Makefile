@@ -58,6 +58,10 @@ test: all engine_test
 	"$(LAUNCHER)" --self-test
 	./vk compile examples/hello.vk /tmp/vektkove-test.vkb
 	./vk run /tmp/vektkove-test.vkb
+	./vk check examples/hello.vk
+	./vkport check examples/hello.vk
+	@test "`./vk score examples/hello.vk`" = 1
+	@test "`./vkport score LICENSE`" = 0
 	./vk compile examples/scene3d.vk /tmp/vektkove-scene3d-test.vkb
 	./vk run /tmp/vektkove-scene3d-test.vkb
 	./vk compile examples/code3d.vk /tmp/vektkove-code3d-test.vkb
@@ -82,5 +86,5 @@ test: all engine_test
 	./vkport compile examples/multi_client.vk /tmp/vektkove-multi-client-portable-test.vkb
 	python3 portable/chat_test.py ./vkport
 	sh portable/net_test.sh ./vkport
-	@test `./vk keywords | wc -l | tr -d ' '` -eq 1374
+	@test `./vk keywords | wc -l | tr -d ' '` -eq 1394
 	@test "`./vkport keyword-count`" = "`./vk keywords | wc -l | tr -d ' '`"

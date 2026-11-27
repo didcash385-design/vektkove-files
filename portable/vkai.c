@@ -34,7 +34,8 @@ void vk_ai_clear(VKAIContext *context) {
 
 void vk_ai_destroy(VKAIContext *context) {
     vk_ai_clear(context);
-    memset(context, 0, sizeof(*context));
+    volatile unsigned char *bytes = (volatile unsigned char *)context;
+    for (size_t index = 0; index < sizeof(*context); index++) bytes[index] = 0;
 }
 
 int vk_ai_configure(VKAIContext *context, const char *backend, const char *model, char *error, size_t error_size) {
@@ -49,6 +50,72 @@ int vk_ai_configure(VKAIContext *context, const char *backend, const char *model
     }
     memcpy(context->backend, backend, strlen(backend) + 1);
     memcpy(context->model, model, length + 1);
+    return 1;
+}
+
+int vk_ai_set_api_key(VKAIContext *context, const char *key, char *error, size_t error_size) {
+    size_t length = strlen(key);
+    if (length >= sizeof(context->api_key) || strpbrk(key, "\r\n")) {
+        snprintf(error, error_size, "API key is invalid or too long.");
+        return 0;
+    }
+    volatile char *old_key = context->api_key;
+    for (size_t index = 0; index < sizeof(context->api_key); index++) old_key[index] = 0;
+    memcpy(context->api_key, key, length + 1);
+    return 1;
+}
+
+char *vk_ai_code_tree(const unsigned char *bytecode, size_t length, const char *source, char *error, size_t error_size) {
+    if (length < 4 || memcmp(bytecode, "VK01", 4)) { snprintf(error, error_size, "Invalid Vektkove bytecode."); return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    cJSON *instructions = root ? cJSON_AddArrayToObject(root, "instructions") : NULL;
+    if (!root || !instructions || !cJSON_AddStringToObject(root, "format", "vektkove-instruction-tree-v1") ||
+        !cJSON_AddStringToObject(root, "source", source) || !cJSON_AddNumberToObject(root, "syntax_reward", 1)) goto fail;
+    size_t position = 4;
+    while (position < length) {
+        if (length - position < 2) goto fail;
+        unsigned opcode = bytecode[position++], count = bytecode[position++];
+        cJSON *instruction = cJSON_CreateObject();
+        if (!instruction) goto fail;
+        if (!cJSON_AddItemToArray(instructions, instruction)) { cJSON_Delete(instruction); goto fail; }
+        cJSON *operands = cJSON_AddArrayToObject(instruction, "operands");
+        if (!operands || !cJSON_AddNumberToObject(instruction, "opcode", opcode)) goto fail;
+        for (unsigned index = 0; index < count; index++) {
+            if (length - position < 4) goto fail;
+            size_t size = ((size_t)bytecode[position] << 24) | ((size_t)bytecode[position + 1] << 16) | ((size_t)bytecode[position + 2] << 8) | bytecode[position + 3];
+            position += 4;
+            if (size > length - position || memchr(bytecode + position, 0, size)) goto fail;
+            char *token = malloc(size + 1);
+            if (!token) goto fail;
+            memcpy(token, bytecode + position, size); token[size] = 0; position += size;
+            const char *kind = token[0] == '$' ? "variable_reference" : token[0] == '"' ? "quoted_text" : "literal_or_name";
+            cJSON *operand = cJSON_CreateObject();
+            if (!operand) { free(token); goto fail; }
+            if (!cJSON_AddItemToArray(operands, operand)) { free(token); cJSON_Delete(operand); goto fail; }
+            int ok = cJSON_AddStringToObject(operand, "kind", kind) && cJSON_AddStringToObject(operand, "token", token);
+            free(token);
+            if (!ok) goto fail;
+        }
+    }
+    char *result = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!result) snprintf(error, error_size, "Could not export instruction tree.");
+    return result;
+fail:
+    cJSON_Delete(root);
+    snprintf(error, error_size, "Could not export instruction tree.");
+    return NULL;
+}
+
+int vk_ai_synthetic_source(const char *seed, unsigned index, char *source, size_t size, char *error, size_t error_size) {
+    size_t length = strlen(seed);
+    if (!length || length > 32768 || index >= 3) { snprintf(error, error_size, "Synthetic seed must be 1 to 32768 bytes."); return 0; }
+    unsigned hash = 2166136261u;
+    for (size_t offset = 0; offset < length; offset++) hash = (hash ^ (unsigned char)seed[offset]) * 16777619u;
+    unsigned first = (hash % 90u) + 1u, second = ((hash / 97u) % 9u) + 1u;
+    const char *operation = index == 0 ? "add" : index == 1 ? "multiply" : "subtract";
+    int written = snprintf(source, size, "set value %u\n%s value %u\nout $value\nhalt\n", first, operation, second);
+    if (written < 0 || (size_t)written >= size) { snprintf(error, error_size, "Could not generate synthetic example."); return 0; }
     return 1;
 }
 
@@ -71,20 +138,26 @@ int vk_ai_add_text(VKAIContext *context, const char *source, const char *text, c
     return 1;
 }
 
-int vk_ai_add_file(VKAIContext *context, const char *path, char *error, size_t error_size) {
+char *vk_ai_read_file(const char *path, char *error, size_t error_size) {
     FILE *file = fopen(path, "rb");
-    if (!file) { snprintf(error, error_size, "Could not open training file."); return 0; }
+    if (!file) { snprintf(error, error_size, "Could not open training file."); return NULL; }
     char *text = malloc(VKAI_KNOWLEDGE_LIMIT + 1);
-    if (!text) { fclose(file); snprintf(error, error_size, "Out of memory."); return 0; }
+    if (!text) { fclose(file); snprintf(error, error_size, "Out of memory."); return NULL; }
     size_t length = fread(text, 1, VKAI_KNOWLEDGE_LIMIT + 1, file);
     int failed = ferror(file);
     fclose(file);
-    if (failed || length > VKAI_KNOWLEDGE_LIMIT || memchr(text, '\0', length)) {
+    if (failed || length > VKAI_KNOWLEDGE_LIMIT || memchr(text, '\0', length) || !vkc_valid_utf8((const unsigned char *)text, length)) {
         free(text);
         snprintf(error, error_size, "Training file must be UTF-8 text at most 256 KiB.");
-        return 0;
+        return NULL;
     }
     text[length] = '\0';
+    return text;
+}
+
+int vk_ai_add_file(VKAIContext *context, const char *path, char *error, size_t error_size) {
+    char *text = vk_ai_read_file(path, error, error_size);
+    if (!text) return 0;
     int result = vk_ai_add_text(context, path, text, error, error_size);
     free(text);
     return result;
@@ -181,7 +254,7 @@ static char *vk_ai_http(const char *url, const char *body, const char *key, char
     }
     int ready = fputs("silent\nfail\nmax-time = 30\nconnect-timeout = 10\nmax-filesize = 1048576\nproto = \"=http,https\"\nproto-redir = \"=https\"\nnoproxy = \"127.0.0.1,localhost\"\n", input) >= 0 &&
                 vk_ai_config_value(input, "url", url) &&
-                vk_ai_config_value(input, "user-agent", "Vektkove/1.4.1 (+https://github.com/didcash385-design/vektkove-files)");
+                vk_ai_config_value(input, "user-agent", "Vektkove/1.4.2 (+https://github.com/didcash385-design/vektkove-files)");
     if (!body) ready = ready && fputs("location\nmax-redirs = 3\n", input) >= 0;
     if (body) {
         ready = ready && vk_ai_config_value(input, "header", "Content-Type: application/json") && vk_ai_config_value(input, "data", body);
@@ -299,7 +372,7 @@ char *vk_ai_ask(const VKAIContext *context, const char *question, char *error, s
         url = getenv("VEKTKOVE_OLLAMA_URL");
         if (!url || !*url) url = "http://127.0.0.1:11434/api/chat";
     } else {
-        key = getenv("OPENAI_API_KEY");
+        key = context->api_key[0] ? context->api_key : getenv("OPENAI_API_KEY");
         if (!key || !*key) { snprintf(error, error_size, "OPENAI_API_KEY is required for the openai backend."); return NULL; }
         url = getenv("VEKTKOVE_OPENAI_URL");
         if (!url || !*url) url = "https://api.openai.com/v1/chat/completions";
