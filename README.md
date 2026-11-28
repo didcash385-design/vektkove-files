@@ -1,19 +1,19 @@
 Read the [complete Vektkove manual](MANUAL.md) for editor, language, UI Maker, command-line, and VKLINK instructions. The editor and launcher follow the Mac's light or dark appearance. Use **A-** and **A+**, or the View menu, to adjust code and output text size. Select the **Manual** tab to search command names, filter by Code, Logic, Math, Text, or UI, switch between All, 2D, and 3D command tabs, sort command spellings A-Z or group them by category, and page through all results.
 To rebuild, install Apple Command Line Tools and run `make` in this folder. Run `make test` for the interpreter, native UI, and command-line checks. The build contains both x86_64 and arm64 macOS slices. Tests run on the host architecture.
-# Vektkove 1.5.0
+# Vektkove 1.4.3
 
 Vektkove is a custom programming language and native Mac editor. `.vk` source is compiled to Vektkove's `VK01` bytecode and executed by its interpreter. Optional AI commands use `curl` and a separately provided local or hosted model; ordinary programs do not require an AI service.
 
 ## Versioned Files
 
-The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for published versions through 1.4.2. This source tree is 1.5.0; updated installers and release archives are not published yet. Each download folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
+The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for published versions through 1.4.3. Each download folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
-Until 1.5.0 release archives are published, download the latest published archive for your operating system and CPU from the [1.4.2 release](https://github.com/didcash385-design/vektkove-files/releases/tag/v1.4.2). Extract the macOS archive to open `Vektkove.app` and `VektkoveLauncher.app`. Choose x64 for Intel Macs or arm64 for Apple Silicon.
+Download the latest 1.4.3 archive for your operating system and CPU from the [1.4.3 release](https://github.com/didcash385-design/vektkove-files/releases/tag/v1.4.3). Extract the macOS archive to open `Vektkove.app` and `VektkoveLauncher.app`. Choose x64 for Intel Macs or arm64 for Apple Silicon.
 
 For Ubuntu and other Linux distributions, choose the x64 archive for Intel/AMD or arm64 for AArch64 systems, extract it, and run:
 
 ```sh
-tar -xzf vektkove-1.4.2-linux-x64.tar.gz
+tar -xzf vektkove-1.4.3-linux-x64.tar.gz
 ./vk --version
 ./vk run examples/hello.vk
 ```

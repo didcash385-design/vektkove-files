@@ -1,4 +1,4 @@
-# Vektkove 1.5.0 Manual
+# Vektkove 1.4.3 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
