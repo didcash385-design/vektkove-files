@@ -55,8 +55,8 @@ engine_test: VKEngine.m VKEngine.h portable/vkcodec.h $(AI_SRC) $(AI_DEPS) engin
 	$(CC) $(CFLAGS) -framework Foundation VKEngine.m engine_test.m $(AI_SRC) -o "$@"
 
 test: all engine_test
-	@test "`./vk --version`" = "Vektkove 1.4.4"
-	@test "`./vkport --version`" = "Vektkove 1.4.4"
+	@test "`./vk --version`" = "Vektkove 1.5.0"
+	@test "`./vkport --version`" = "Vektkove 1.5.0"
 	@test "`./vk run examples/codecs.vk`" = "`printf 'SGVsbG8sIFZla3Rrb3ZlIQ==\\nHello, Vektkove!\\nHello, Vektkove!\\n'`"
 	@test "`./vkport run examples/codecs.vk`" = "`printf 'SGVsbG8sIFZla3Rrb3ZlIQ==\\nHello, Vektkove!\\nHello, Vektkove!\\n'`"
 	./engine_test

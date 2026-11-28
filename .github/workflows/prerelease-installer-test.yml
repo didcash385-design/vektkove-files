@@ -17,20 +17,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $compiler)) { throw 'Inno Setup compiler is unavailable' }
-          $env:VK_VERSION = '1.4.4'
+          $env:VK_VERSION = '1.5.0'
           $env:VK_OUTPUT_DIR = Join-Path $env:RUNNER_TEMP 'installers'
           New-Item -ItemType Directory -Path $env:VK_OUTPUT_DIR -Force | Out-Null
           foreach ($architecture in @('x64', 'arm64')) {
             $env:VK_ARCH = $architecture
             $env:VK_SOURCE_DIR = Join-Path $env:RUNNER_TEMP "package-$architecture"
-            $archive = Join-Path $PWD "platforms/windows/$architecture/1.4.4/vektkove-1.4.4-windows-$architecture.zip"
+            $archive = Join-Path $PWD "platforms/windows/$architecture/1.5.0/vektkove-1.5.0-windows-$architecture.zip"
             Expand-Archive $archive -DestinationPath $env:VK_SOURCE_DIR
             & $compiler portable/windows-installer.iss
             if ($LASTEXITCODE -ne 0) { throw "Installer build failed for $architecture" }
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installers-1.4.4
+          name: windows-installers-1.5.0
           path: ${{ runner.temp }}/installers/*.exe
           if-no-files-found: error
   test:
@@ -45,13 +45,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: windows-installers-1.4.4
+          name: windows-installers-1.5.0
           path: installers
       - name: Install, run, and uninstall
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = Join-Path $PWD 'installers/vektkove-1.4.4-windows-${{ matrix.platform.arch }}-setup.exe'
+          $installer = Join-Path $PWD 'installers/vektkove-1.5.0-windows-${{ matrix.platform.arch }}-setup.exe'
           $installDir = Join-Path $env:LOCALAPPDATA 'Programs/Vektkove'
           $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -60,7 +60,7 @@ jobs:
           $env:PATH = "$env:PATH;$userPath"
           $command = (Get-Command vk.exe -ErrorAction Stop).Source
           $reported = & $command --version
-          if ($LASTEXITCODE -ne 0 -or $reported -ne 'Vektkove 1.4.4') { throw 'Installed version check failed' }
+          if ($LASTEXITCODE -ne 0 -or $reported -ne 'Vektkove 1.5.0') { throw 'Installed version check failed' }
           if (-not (Test-Path (Join-Path $installDir 'MANUAL.md'))) { throw 'Installed manual is missing' }
           $output = & $command run (Join-Path $installDir 'examples/hello.vk')
           if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -ne "Hello from Vektkove`n5") { throw 'Installed example failed' }

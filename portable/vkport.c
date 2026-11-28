@@ -19,7 +19,7 @@
 #include "vkcodec.h"
 #include "vkai.h"
 #include "../third_party/cjson/cJSON.h"
-#define VK_VERSION "1.4.4"
+#define VK_VERSION "1.5.0"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
