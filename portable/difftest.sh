@@ -30,6 +30,8 @@ check() {
 
 # --- core and numbers ---
 check 'text g "Hello"\nout $g\nset t 2\nadd t 3\nout $t\nhalt\nout "no"'
+check "track score 10\ntrack_add score 5\ntrack_count events\ntrack_min low 90\ntrack_min low 70\ntrack_max best 8\ntrack_max best 12\nsave \"$WORK/state.json\"\ntrack score 0\ntrack_reset events\nload \"$WORK/state.json\"\nout \$score\nout \$events\nout \$low\nout \$best" success
+check 'set hits 0\nimport ui\nwindow "Tracker" 100 100\nui_scene2d 0 0 100 100\nui_frame2d\ntrack_count hits\nui_end_frame2d' success
 check 'set a 0x10\nout $a\nset b 5.\nout $b\nset c 1e5\nout $c\nset d 100000000\nout $d\nset e 1e15\nout $e'
 check 'set f 100000000000000000000\nout $f\nset g 0.1\nadd g 0.2\nout $g\nset h 1\ndivide h 3\nout $h'
 check 'set i inf\nout $i\nset j +7\nout $j\nset k 1e400\nout $k\nset l 1e-7\nout $l\nset m 123456789012345678\nout $m\nset n -0\nout $n'
@@ -46,6 +48,9 @@ check 'set n 2.5\nround n\nout $n\nset m -2.5\nround m\nout $m'
 check 'set n 2.6\nfloor n\nout $n\nset m 2.1\nceil m\nout $m\nset t -2.6\ntruncate t\nout $t'
 check 'set n 5\nsign n\nout $n\nset m -3\nsign m\nout $m\nset z 0\nsign z\nout $z'
 check 'set n 5\nmin n 2\nout $n\nset m 5\nmax m 8\nout $m'
+check 'set n 12\nclamp n 0 10\nout $n\nset n -4\nclamp n 0 10\nout $n' success
+check 'set n 5\nclamp n 10 0'
+check 'set n 5\nclamp n 0 "bad"'
 check 'set n 0\nsin n\nout $n\nset c 0\ncos c\nout $c\nset t 1\ntan t\nout $t'
 check 'set n 1\nexp n\nout $n\nset l 100\nlog10 l\nout $l\nset a 1\natan a\nout $a'
 # --- comparisons and logic ---
@@ -68,6 +73,11 @@ check "$large_ui" success
 check "$large_3d" success
 check "$large_2d" success
 check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "cube"\nui_keymove3d "cube" "w" 0 0 -1' success
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "follower"\nui_sphere3d 3 0 0 1 "#00FF00"\nui_id "target"\nui_follow3d "follower" "target" 2' success
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "follower"\nui_follow3d "follower" "missing" 2'
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "follower"\nui_follow3d "follower" "follower" 2'
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "actor"\nui_animate3d "actor" 1 2 3 4' success
+check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_box3d 0 0 0 1 1 1 "#FF0000"\nui_id "actor"\nui_animate3d "actor" 1 2 3 0'
 check 'import ui\nwindow "3D" 100 100\nui_scene3d 0 0 100 100\nui_keymove3d "missing" "w" 0 0 -1'
 check 'import ui\nwindow "World" 100 100\nui_scene3d 0 0 100 100\nui_voxel3d 0 0 0 "#44AA55"\nui_voxel_controls3d 0.5 "#FFFFFF"\nui_box3d 0 2 0 1 1 1 "#FF0000"\nui_id "mob"\nui_frame3d\nui_remove3d "mob"\nui_end_frame3d' success
 check 'import ui\nwindow "World" 100 100\nui_scene3d 0 0 100 100\nui_voxel3d 0.5 0 0 "#44AA55"'

@@ -360,6 +360,12 @@ static NSArray<NSValue *> *VKMeshForPrimitive(VKOpcode opcode, NSArray *values) 
 @property BOOL physicsEnabled;
 @property NSTimeInterval spinPeriod;
 @property CFTimeInterval spinStart;
+@property (copy) NSString *followTarget;
+@property CGFloat followSpeed;
+@property VKVector3 animationOffset;
+@property VKVector3 animationPrevious;
+@property NSTimeInterval animationDuration;
+@property CFTimeInterval animationStart;
 @end
 @implementation VK3DObject
 @end
@@ -532,6 +538,8 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
 - (VK3DObject *)addPrimitive:(VKOpcode)opcode values:(NSArray *)values;
 - (VK3DObject *)addImportedMesh:(NSArray<NSValue *> *)triangles values:(NSArray *)values;
 - (void)setSpinForID:(NSString *)identifier period:(NSTimeInterval)period;
+- (void)setFollowForID:(NSString *)identifier target:(NSString *)target speed:(CGFloat)speed;
+- (void)setAnimationForID:(NSString *)identifier offset:(VKVector3)offset duration:(NSTimeInterval)duration;
 - (void)setPhysicsForID:(NSString *)identifier mass:(CGFloat)mass restitution:(CGFloat)restitution;
 - (void)setGravity:(VKVector3)gravity;
 - (void)setVelocityForID:(NSString *)identifier velocity:(VKVector3)velocity;
@@ -719,6 +727,20 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     object.spinStart = CACurrentMediaTime();
     [self startAnimation];
 }
+- (void)setFollowForID:(NSString *)identifier target:(NSString *)target speed:(CGFloat)speed {
+    VK3DObject *object = self.objectsByID[identifier];
+    object.followTarget = target;
+    object.followSpeed = speed;
+    [self startAnimation];
+}
+- (void)setAnimationForID:(NSString *)identifier offset:(VKVector3)offset duration:(NSTimeInterval)duration {
+    VK3DObject *object = self.objectsByID[identifier];
+    object.animationOffset = offset;
+    object.animationPrevious = VKVectorMake(0, 0, 0);
+    object.animationDuration = duration;
+    object.animationStart = CACurrentMediaTime();
+    [self startAnimation];
+}
 - (void)setPhysicsForID:(NSString *)identifier mass:(CGFloat)mass restitution:(CGFloat)restitution {
     VK3DObject *object = self.objectsByID[identifier];
     object.mass = mass;
@@ -754,6 +776,19 @@ static void VKMiniRasterizeTriangle(device_t *device, NSPoint points[3], double 
     CFTimeInterval now = CACurrentMediaTime();
     CGFloat elapsed = MIN(0.05, MAX(0, now - self.lastFrameTime));
     self.lastFrameTime = now;
+    for (VK3DObject *object in self.objects) {
+        if (object.animationDuration > 0) {
+            double phase = fmod(MAX(0, now - object.animationStart), object.animationDuration) / object.animationDuration;
+            VKVector3 offset = VKVectorScale(object.animationOffset, 1 - fabs(2 * phase - 1));
+            object.position = VKVectorAdd(object.position, VKVectorSubtract(offset, object.animationPrevious));
+            object.animationPrevious = offset;
+        }
+        VK3DObject *target = self.objectsByID[object.followTarget ?: @""];
+        if (!target || object.followSpeed <= 0) continue;
+        VKVector3 delta = VKVectorSubtract(target.position, object.position);
+        double distance = VKVectorLength(delta);
+        if (distance > 0.000001) object.position = VKVectorAdd(object.position, VKVectorScale(delta, MIN(distance, object.followSpeed * elapsed) / distance));
+    }
     CGFloat maximumSpeed = 0;
     CGFloat minimumRadius = 10000;
     NSMutableArray<VK3DObject *> *physicsObjects = [NSMutableArray array];
@@ -1411,7 +1446,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     [self createMenu];
     if (self.launcherMode) { [self createLauncherWindow]; return; }
     self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1100, 720) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-    self.window.title = @"Vektkove 1.4.2";
+    self.window.title = @"Vektkove 1.5.0";
     self.window.delegate = self;
     self.window.minSize = NSMakeSize(800, 570);
     [self.window center];
@@ -1574,7 +1609,7 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
     NSAttributedString *credits = [[NSAttributedString alloc] initWithString:creditText attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10]}];
     [NSApp orderFrontStandardAboutPanelWithOptions:@{
         NSAboutPanelOptionApplicationName: @"Vektkove",
-        NSAboutPanelOptionApplicationVersion: @"1.4.2",
+        NSAboutPanelOptionApplicationVersion: @"1.5.0",
         NSAboutPanelOptionCredits: credits
     }];
 }
@@ -2247,6 +2282,18 @@ static CGFloat contrast(NSColor *first, NSColor *second, NSAppearance *appearanc
         }
         if (opcode == VKUISpin3D) {
             [sceneView setSpinForID:values[0] period:[values[1] doubleValue]];
+            lastSceneObject = nil;
+            lastControl = nil;
+            continue;
+        }
+        if (opcode == VKUIFollow3D) {
+            [sceneView setFollowForID:values[0] target:values[1] speed:[values[2] doubleValue]];
+            lastSceneObject = nil;
+            lastControl = nil;
+            continue;
+        }
+        if (opcode == VKUIAnimate3D) {
+            [sceneView setAnimationForID:values[0] offset:VKVectorMake([values[1] doubleValue], [values[2] doubleValue], [values[3] doubleValue]) duration:[values[4] doubleValue]];
             lastSceneObject = nil;
             lastControl = nil;
             continue;
@@ -3398,6 +3445,37 @@ int main(int argc, const char *argv[]) {
             shapeTest.lastFrameTime = CACurrentMediaTime() - 0.02;
             [shapeTest stepFrame];
             if (ballObject.position.y <= 0.9 || ballObject.velocity.y < 0) return 131;
+            NSString *followSource = @"import ui\nwindow \"Follow\" 320 240\nui_scene3d 0 0 320 240\nui_box3d 0 0 0 1 1 1 \"#FF0000\"\nui_id \"follower\"\nui_sphere3d 4 0 0 1 \"#00FF00\"\nui_id \"target\"\nui_follow3d \"follower\" \"target\" 4\nui_animate3d \"follower\" 0 2 0 4\nhalt";
+            NSData *followCode = [VKEngine compile:followSource error:&gameError];
+            NSMutableArray *followUI = [NSMutableArray array];
+            if (!followCode || ![VKEngine run:followCode ui:followUI error:&gameError]) return 133;
+            [delegate showUI:followUI];
+            VK3DView *followView = nil;
+            for (NSView *subview in delegate.previewWindows.lastObject.contentView.subviews) if ([subview isKindOfClass:VK3DView.class]) followView = (VK3DView *)subview;
+            VK3DObject *follower = followView.objectsByID[@"follower"], *followTarget = followView.objectsByID[@"target"];
+            if (!follower || !followTarget || ![follower.followTarget isEqualToString:@"target"]) return 134;
+            followView.lastFrameTime = CACurrentMediaTime() - 0.04;
+            [followView stepFrame];
+            if (follower.position.x <= 0 || follower.position.x >= 4) return 135;
+            followTarget.position = VKVectorMake(follower.position.x + 0.01, 0, 0);
+            followView.lastFrameTime = CACurrentMediaTime() - 0.04;
+            [followView stepFrame];
+            if (fabs(follower.position.x - followTarget.position.x) > 0.000001) return 136;
+            [followView removeObjectForID:@"target"];
+            double stoppedX = follower.position.x;
+            followView.lastFrameTime = CACurrentMediaTime() - 0.04;
+            [followView stepFrame];
+            if (follower.position.x != stoppedX) return 137;
+            follower.animationStart = CACurrentMediaTime() - 1;
+            follower.animationPrevious = VKVectorMake(0, 0, 0);
+            follower.position = VKVectorMake(stoppedX, 0, 0);
+            followView.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [followView stepFrame];
+            if (fabs(follower.position.y - 1) > 0.01) return 138;
+            follower.animationStart = CACurrentMediaTime() - 4;
+            followView.lastFrameTime = CACurrentMediaTime() - 0.02;
+            [followView stepFrame];
+            if (fabs(follower.position.y) > 0.01) return 139;
             [delegate.elements removeAllObjects];
             [delegate.table reloadData];
             delegate.builderTitle.stringValue = @"My Vektkove App";

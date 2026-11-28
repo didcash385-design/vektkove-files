@@ -27,14 +27,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $os = '${{ matrix.platform.os }}'
           $arch = '${{ matrix.platform.arch }}'
-          $archive = Join-Path $PWD "platforms/$os/$arch/1.4.2/vektkove-1.4.2-$os-$arch.${{ matrix.platform.extension }}"
+          $archive = Join-Path $PWD "platforms/$os/$arch/1.5.0/vektkove-1.5.0-$os-$arch.${{ matrix.platform.extension }}"
           $package = Join-Path $env:RUNNER_TEMP 'vektkove-package'
           New-Item -ItemType Directory -Path $package -Force | Out-Null
           if ($os -eq 'windows') { Expand-Archive $archive -DestinationPath $package -Force; $command = Join-Path $package 'vk.exe' }
           else { tar -xzf $archive -C $package; if ($LASTEXITCODE -ne 0) { throw 'Archive extraction failed' }; $command = Join-Path $package 'vk' }
           $version = & $command --version
-          if ($LASTEXITCODE -ne 0 -or $version -ne 'Vektkove 1.4.2') { throw "Incorrect version: $version" }
-          if ((Get-Content (Join-Path $package 'MANUAL.md') -TotalCount 1) -ne '# Vektkove 1.4.2 Manual') { throw 'Incorrect manual' }
+          if ($LASTEXITCODE -ne 0 -or $version -ne 'Vektkove 1.5.0') { throw "Incorrect version: $version" }
+          if ((Get-Content (Join-Path $package 'MANUAL.md') -TotalCount 1) -ne '# Vektkove 1.5.0 Manual') { throw 'Incorrect manual' }
           if (-not (Test-Path (Join-Path $package 'LICENSE.cJSON.txt'))) { throw 'Missing cJSON license' }
           $output = & $command run (Join-Path $package 'examples/hello.vk')
           if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -ne "Hello from Vektkove`n5") { throw 'Example execution failed' }
@@ -46,8 +46,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw '3D physics source validation failed' }
           & $command run (Join-Path $package 'examples/boxphysics3d.vk')
           if ($LASTEXITCODE -ne 0) { throw '3D box physics source validation failed' }
+          & $command run (Join-Path $package 'examples/entity3d.vk')
+          if ($LASTEXITCODE -ne 0) { throw '3D entity source validation failed' }
           node portable/ai_integration_test.mjs - $command
           if ($LASTEXITCODE -ne 0) { throw 'AI integration failed' }
+          $archiveCommand = if ($os -eq 'macos') { Join-Path $package 'vkport' } else { $command }
+          node portable/archive_test.mjs $archiveCommand
+          if ($LASTEXITCODE -ne 0) { throw 'Game archive encryption failed' }
           if ($os -eq 'macos') {
             & (Join-Path $package 'Vektkove.app/Contents/MacOS/Vektkove') --self-test
             if ($LASTEXITCODE -ne 0) { throw 'Editor and renderer self-test failed' }

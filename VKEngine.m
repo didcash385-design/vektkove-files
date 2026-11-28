@@ -278,7 +278,19 @@ static NSDictionary *commandTable(void) {
             @[@(VKUIKeyMove3D), @5, @"ui_keymove3d keymove3d game_keymove3d"],
             @[@(VKUIVoxel3D), @4, @"ui_voxel3d"],
             @[@(VKUIVoxelControls3D), @2, @"ui_voxel_controls3d"],
-            @[@(VKUIRemove3D), @1, @"ui_remove3d"]
+            @[@(VKUIRemove3D), @1, @"ui_remove3d"],
+            @[@(VKUIFollow3D), @3, @"ui_follow3d follow3d game_follow3d"],
+            @[@(VKUIAnimate3D), @5, @"ui_animate3d animate3d game_animate3d"],
+            @[@(VKClamp), @3, @"clamp clamp_number limit_range"],
+            @[@(VKNetPeerCount), @1, @"net_peer_count network_peer_count"],
+            @[@(VKTrack), @2, @"track track_set game_track"],
+            @[@(VKTrackAdd), @2, @"track_add game_track_add"],
+            @[@(VKTrackCount), @1, @"track_count game_track_count"],
+            @[@(VKTrackMin), @2, @"track_min game_track_min"],
+            @[@(VKTrackMax), @2, @"track_max game_track_max"],
+            @[@(VKTrackReset), @1, @"track_reset game_track_reset"],
+            @[@(VKSave), @1, @"save save_game game_save"],
+            @[@(VKLoad), @1, @"load load_game game_load"]
         ];
         NSMutableDictionary *table = [NSMutableDictionary dictionary];
         for (NSArray *definition in definitions) {
@@ -309,7 +321,7 @@ static BOOL opcodeIs2DGameInstruction(VKOpcode opcode) {
 static BOOL opcodeIs3DGameInstruction(VKOpcode opcode) {
     return opcode == VKUIPhysics3D || opcode == VKUIGravity3D || opcode == VKUIFrame3D || opcode == VKUIEndFrame3D ||
         opcode == VKUIMove3D || opcode == VKUIForce3D || opcode == VKUISetVelocity3D || opcode == VKUIVelocity3D || opcode == VKUIMesh3D || opcode == VKUIKeyMove3D ||
-        opcode == VKUIVoxel3D || opcode == VKUIVoxelControls3D || opcode == VKUIRemove3D;
+        opcode == VKUIVoxel3D || opcode == VKUIVoxelControls3D || opcode == VKUIRemove3D || opcode == VKUIFollow3D || opcode == VKUIAnimate3D;
 }
 
 static BOOL opcodeIsUIInstruction(VKOpcode opcode) {
@@ -321,12 +333,13 @@ static BOOL opcodeIsUIInstruction(VKOpcode opcode) {
 static BOOL opcodeIsFrameCallbackInstruction(VKOpcode opcode) {
     switch (opcode) {
         case VKText: case VKSet: case VKAdd: case VKSubtract: case VKMultiply: case VKDivide: case VKModulo: case VKPower:
-        case VKMin: case VKMax: case VKEqual: case VKNotEqual: case VKLess: case VKLessEqual: case VKGreater: case VKGreaterEqual:
+        case VKMin: case VKMax: case VKClamp: case VKEqual: case VKNotEqual: case VKLess: case VKLessEqual: case VKGreater: case VKGreaterEqual:
         case VKNot: case VKAnd: case VKOr: case VKNegate: case VKAbs: case VKRound: case VKFloor: case VKCeil: case VKSqrt:
         case VKSin: case VKCos: case VKTan: case VKAsin: case VKAcos: case VKAtan: case VKLog: case VKLog10: case VKExp:
         case VKSign: case VKTruncate: case VKLabel: case VKJump: case VKIf: case VKUnless:
         case VKUIMove2D: case VKUIForce2D: case VKUISetVelocity2D:
-        case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: case VKUIRemove3D: return YES;
+        case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: case VKUIRemove3D:
+        case VKTrack: case VKTrackAdd: case VKTrackCount: case VKTrackMin: case VKTrackMax: case VKTrackReset: return YES;
         default: return NO;
     }
 }
@@ -386,6 +399,108 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
     double number;
     if ([scanner scanDouble:&number] && scanner.isAtEnd && isfinite(number)) return @(number);
     return token;
+}
+
+static BOOL VKValidStateVariableName(NSString *name) {
+    if (!name.length || name.length > 256 || [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[name characterAtIndex:0]]) return NO;
+    NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"] invertedSet];
+    return [name rangeOfCharacterFromSet:invalid].location == NSNotFound;
+}
+
+static BOOL VKStringContainsNUL(NSString *value) {
+    const char *utf8 = value.UTF8String;
+    return !utf8 || strlen(utf8) != [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+}
+
+static BOOL VKSaveGameState(NSDictionary *variables, NSString *path, NSString **error) {
+    if (!path.length || path.length > 4096) { if (error) *error = @"save needs a nonempty file path of at most 4096 characters."; return NO; }
+    if (variables.count > 4096) { if (error) *error = @"Game state exceeds the 4096-variable limit."; return NO; }
+    for (NSString *name in variables) {
+        id value = variables[name];
+        if (!VKValidStateVariableName(name) ||
+            (![value isKindOfClass:NSString.class] && ![value isKindOfClass:NSNumber.class]) ||
+            ([value isKindOfClass:NSString.class] && VKStringContainsNUL(value)) ||
+            ([value isKindOfClass:NSNumber.class] && !isfinite([value doubleValue]))) {
+            if (error) *error = @"Game state contains an unsupported variable.";
+            return NO;
+        }
+    }
+    NSDictionary *save = @{@"format": @"VKGS", @"version": @1, @"variables": variables};
+    NSError *serializationError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:save options:NSJSONWritingSortedKeys error:&serializationError];
+    if (!data) { if (error) *error = [NSString stringWithFormat:@"Could not encode game state: %@", serializationError.localizedDescription]; return NO; }
+    if (data.length > 1024 * 1024) { if (error) *error = @"Game save exceeds the 1 MiB limit."; return NO; }
+    NSError *writeError = nil;
+    if (![data writeToFile:path options:NSDataWritingAtomic error:&writeError]) {
+        if (error) *error = [NSString stringWithFormat:@"Could not write game save: %@", writeError.localizedDescription];
+        return NO;
+    }
+    return YES;
+}
+
+static BOOL VKLoadGameState(NSMutableDictionary *variables, NSString *path, NSString **error) {
+    if (!path.length || path.length > 4096) { if (error) *error = @"load needs a nonempty file path of at most 4096 characters."; return NO; }
+    NSError *readError = nil;
+    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:&readError];
+    if (!attributes) { if (error) *error = [NSString stringWithFormat:@"Could not read game save: %@", readError.localizedDescription]; return NO; }
+    if ([attributes[NSFileSize] unsignedLongLongValue] > 1024 * 1024) { if (error) *error = @"Game save exceeds the 1 MiB limit."; return NO; }
+    NSData *data = [NSData dataWithContentsOfFile:path options:0 error:&readError];
+    if (!data || data.length > 1024 * 1024) { if (error) *error = data ? @"Game save exceeds the 1 MiB limit." : [NSString stringWithFormat:@"Could not read game save: %@", readError.localizedDescription]; return NO; }
+    NSError *parseError = nil;
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&parseError];
+    NSDictionary *root = [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
+    NSDictionary *savedVariables = [root[@"variables"] isKindOfClass:NSDictionary.class] ? root[@"variables"] : nil;
+    if (![root[@"format"] isEqual:@"VKGS"] || ![root[@"version"] isEqual:@1] || !savedVariables || savedVariables.count > 4096) {
+        if (error) *error = [NSString stringWithFormat:@"Invalid Vektkove game save%@.", parseError ? [NSString stringWithFormat:@": %@", parseError.localizedDescription] : @""];
+        return NO;
+    }
+    NSMutableDictionary *validated = [NSMutableDictionary dictionaryWithCapacity:savedVariables.count];
+    for (id name in savedVariables) {
+        id value = savedVariables[name];
+        if (![name isKindOfClass:NSString.class] || !VKValidStateVariableName(name) ||
+            (![value isKindOfClass:NSString.class] && ![value isKindOfClass:NSNumber.class]) ||
+            ([value isKindOfClass:NSString.class] && VKStringContainsNUL(value)) ||
+            ([value isKindOfClass:NSNumber.class] && !isfinite([value doubleValue]))) {
+            if (error) *error = @"Invalid variable in Vektkove game save.";
+            return NO;
+        }
+        validated[name] = value;
+    }
+    [variables setDictionary:validated];
+    return YES;
+}
+
+static BOOL VKApplyTracker(VKOpcode opcode, NSMutableDictionary *variables, NSString *name, id value, NSString **error) {
+    if (!VKValidStateVariableName(name)) { if (error) *error = @"Invalid game tracker name."; return NO; }
+    id current = variables[name];
+    if (opcode == VKTrack) {
+        variables[name] = value;
+        return YES;
+    }
+    if (opcode == VKTrackReset) {
+        variables[name] = @0;
+        return YES;
+    }
+    if (opcode == VKTrackCount || opcode == VKTrackAdd) {
+        double amount = opcode == VKTrackCount ? 1 : [value isKindOfClass:NSNumber.class] ? [value doubleValue] : NAN;
+        if ((current && ![current isKindOfClass:NSNumber.class]) || !isfinite(amount)) {
+            if (error) *error = @"Numeric game trackers require numeric values.";
+            return NO;
+        }
+        double result = (current ? [current doubleValue] : 0) + amount;
+        if (!isfinite(result)) { if (error) *error = @"Game tracker value must remain finite."; return NO; }
+        variables[name] = @(result);
+        return YES;
+    }
+    if (![value isKindOfClass:NSNumber.class] || (current && ![current isKindOfClass:NSNumber.class])) {
+        if (error) *error = @"Numeric game trackers require numeric values.";
+        return NO;
+    }
+    double next = [value doubleValue];
+    double result = !current ? next : opcode == VKTrackMin ? fmin([current doubleValue], next) : fmax([current doubleValue], next);
+    if (!isfinite(result)) { if (error) *error = @"Game tracker value must remain finite."; return NO; }
+    variables[name] = @(result);
+    return YES;
 }
 
 @implementation VKEngine
@@ -501,7 +616,19 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
             @(VKUIKeyMove3D): @"id key dx dy dz - Move a named 3D object when a key is pressed.",
             @(VKUIVoxel3D): @"x y z color - Add a unit block at integer coordinates.",
             @(VKUIVoxelControls3D): @"step color - Enable fly controls and mouse block editing.",
-            @(VKUIRemove3D): @"id - Remove a named 3D object, including from a 3D frame callback."
+            @(VKUIRemove3D): @"id - Remove a named 3D object, including from a 3D frame callback.",
+            @(VKUIFollow3D): @"id target speed - Move a named 3D object toward another object each frame.",
+            @(VKUIAnimate3D): @"id dx dy dz seconds - Loop a back-and-forth 3D translation animation.",
+            @(VKClamp): @"name minimum maximum - Restrict a numeric variable to an inclusive range.",
+            @(VKNetPeerCount): @"name - Store the number of accepted or connected peer slots.",
+            @(VKTrack): @"name value - Set a named game statistic or tracker.",
+            @(VKTrackAdd): @"name amount - Add to a named numeric game statistic, starting at zero.",
+            @(VKTrackCount): @"name - Increment a named event counter, starting at zero.",
+            @(VKTrackMin): @"name value - Keep the smallest numeric value seen by this tracker.",
+            @(VKTrackMax): @"name value - Keep the largest numeric value seen by this tracker.",
+            @(VKTrackReset): @"name - Reset a named tracker to zero.",
+            @(VKSave): @"path - Save all game variables and trackers as a JSON save file.",
+            @(VKLoad): @"path - Replace game variables and trackers with a validated JSON save file."
         };
     });
     return descriptions[command[0]];
@@ -521,12 +648,12 @@ static id valueOf(NSString *token, NSDictionary *variables, NSString **error) {
         case VKUIMove2D: case VKUIForce2D: case VKUISetVelocity2D:
         case VKUIPhysics3D: case VKUIGravity3D: case VKUIFrame3D: case VKUIEndFrame3D:
         case VKUIMove3D: case VKUIForce3D: case VKUISetVelocity3D: case VKUIVelocity3D: case VKUIMesh3D: case VKUIKeyMove3D:
-        case VKUIVoxel3D: case VKUIVoxelControls3D: case VKUIRemove3D: return @"UI";
+        case VKUIVoxel3D: case VKUIVoxelControls3D: case VKUIRemove3D: case VKUIFollow3D: case VKUIAnimate3D: return @"UI";
         case VKIf: case VKUnless: case VKJump: case VKLabel: case VKEqual: case VKNotEqual:
         case VKLess: case VKLessEqual: case VKGreater: case VKGreaterEqual: case VKAnd: case VKOr: case VKNot:
             return @"Logic";
         case VKAdd: case VKSubtract: case VKMultiply: case VKDivide: case VKModulo: case VKPower:
-        case VKMin: case VKMax: case VKSin: case VKCos: case VKTan: case VKAsin: case VKAcos:
+        case VKMin: case VKMax: case VKClamp: case VKSin: case VKCos: case VKTan: case VKAsin: case VKAcos:
         case VKAtan: case VKLog: case VKLog10: case VKExp: case VKSign: case VKTruncate:
         case VKAbs: case VKRound: case VKFloor: case VKCeil: case VKSqrt:
             return @"Math";
@@ -600,7 +727,8 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         opcode == VKServerScript || opcode == VKLocalScript || (opcode >= VKNetListen && opcode <= VKNetBroadcast) ||
         opcode == VKUIGravity2D || opcode == VKUIFrame2D || opcode == VKUIEndFrame2D ||
         opcode == VKUIPhysics2D || opcode == VKUIMove2D || opcode == VKUIForce2D || opcode == VKUISetVelocity2D ||
-        opcode == VKUIGravity3D || opcode == VKUIFrame3D || opcode == VKUIEndFrame3D || opcodeIs3DGameInstruction(opcode);
+        opcode == VKUIGravity3D || opcode == VKUIFrame3D || opcode == VKUIEndFrame3D || opcodeIs3DGameInstruction(opcode) ||
+        (opcode >= VKTrack && opcode <= VKTrackReset) || opcode == VKSave || opcode == VKLoad;
 }
 
 + (NSArray<NSString *> *)diagnose:(NSString *)source {
@@ -643,7 +771,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         }
         sawInstruction = YES;
         if (scriptRole == VKServerScript && opcodeIsUIInstruction(opcode)) [result addObject:[NSString stringWithFormat:@"Error %@: Server scripts cannot create UI.", position]];
-        if (opcode >= VKNetListen && opcode <= VKNetBroadcast) {
+        if ((opcode >= VKNetListen && opcode <= VKNetBroadcast) || opcode == VKNetPeerCount) {
             if (!scriptRole) [result addObject:[NSString stringWithFormat:@"Error %@: Declare server_script or local_script before networking.", position]];
             if (opcode == VKNetListen && scriptRole != VKServerScript) [result addObject:[NSString stringWithFormat:@"Error %@: net_listen requires server_script.", position]];
             if (opcode == VKNetConnect && scriptRole != VKLocalScript) [result addObject:[NSString stringWithFormat:@"Error %@: net_connect requires local_script.", position]];
@@ -703,10 +831,13 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         }
         if (afterEnd && !reportedDead) { [result addObject:[NSString stringWithFormat:@"Warning %@: Unreachable code after halt or jump.", position]]; reportedDead = YES; }
         BOOL noName = opcodeHasNoName(opcode);
+        if (opcode >= VKTrack && opcode <= VKTrackReset) {
+            definitions[tokens[1]] = @(number);
+        }
         if (!noName) {
             NSString *name = tokens[1];
-            if ((opcode == VKText || opcode == VKSet || opcode == VKAIAsk) && !definitions[name]) definitions[name] = @(number);
-            if (opcode != VKText && opcode != VKSet && opcode != VKAIAsk) [reads addObject:name];
+            if ((opcode == VKText || opcode == VKSet || opcode == VKAIAsk || opcode == VKNetPeerCount) && !definitions[name]) definitions[name] = @(number);
+            if (opcode != VKText && opcode != VKSet && opcode != VKAIAsk && opcode != VKNetPeerCount) [reads addObject:name];
         }
         for (NSUInteger operand = noName ? 1 : 2; operand < tokens.count; operand++) {
             if ([tokens[operand] hasPrefix:@"$"]) [reads addObject:[tokens[operand] substringFromIndex:1]];
@@ -752,7 +883,7 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         BOOL noName = opcodeHasNoName(opcode);
         if (opcode == VKUIBind && !definitions[tokens[2]])
             [result addObject:[NSString stringWithFormat:@"Error %@: Variable $%@ is used but never defined with text or set.", position, tokens[2]]];
-        if (!noName && opcode != VKText && opcode != VKSet && opcode != VKAIAsk && !definitions[tokens[1]])
+        if (!noName && opcode != VKText && opcode != VKSet && opcode != VKAIAsk && opcode != VKNetPeerCount && !definitions[tokens[1]])
             [result addObject:[NSString stringWithFormat:@"Error %@: Variable $%@ is used but never defined with text or set.", position, tokens[1]]];
         for (NSUInteger operand = noName ? 1 : 2; operand < tokens.count; operand++) {
             NSString *variable = [tokens[operand] hasPrefix:@"$"] ? [tokens[operand] substringFromIndex:1] : nil;
@@ -834,8 +965,15 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             continue;
         }
         if (scriptRole == VKServerScript && uiInstruction) { if (error) *error = @"Server scripts cannot create UI."; return nil; }
-        if (opcode >= VKNetListen && opcode <= VKNetBroadcast) {
+        if ((opcode >= VKNetListen && opcode <= VKNetBroadcast) || opcode == VKNetPeerCount) {
             if (!scriptRole) { if (error) *error = @"Declare server_script or local_script before networking."; return nil; }
+            if (opcode == VKNetPeerCount) {
+                NSString *name = operands[0];
+                NSCharacterSet *invalidName = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"] invertedSet];
+                if (!name.length || [name rangeOfCharacterFromSet:invalidName].location != NSNotFound || [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[name characterAtIndex:0]]) { if (error) *error = @"Invalid variable name for net_peer_count."; return nil; }
+                variables[name] = @(networkClients.count + (networkChannel && networkChannel.descriptor >= 0 ? 1 : 0));
+                continue;
+            }
             if (opcode == VKNetListen && scriptRole != VKServerScript) { if (error) *error = @"net_listen requires server_script."; return nil; }
             if (opcode == VKNetConnect && scriptRole != VKLocalScript) { if (error) *error = @"net_connect requires local_script."; return nil; }
             if (opcode == VKNetListenMulti && scriptRole != VKServerScript) { if (error) *error = @"net_listen_multi requires server_script."; return nil; }
@@ -885,6 +1023,8 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
                 int descriptor = VKOpenTCPConnection(hostValue, [portValue unsignedIntegerValue], opcode == VKNetListen);
                 if (descriptor < 0) { if (error) *error = [NSString stringWithFormat:@"Could not %@ %@:%@.", opcode == VKNetListen ? @"accept a peer on" : @"connect to", hostValue, portValue]; return nil; }
                 [networkChannel closeChannel];
+                for (VKTCPChannel *client in networkClients) [client closeChannel];
+                [networkClients removeAllObjects];
                 networkChannel = [[VKTCPChannel alloc] initWithDescriptor:descriptor];
                 continue;
             }
@@ -1160,6 +1300,17 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             } else if (opcode == VKUIRemove3D) {
                 NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
                 if (!identifier.length || !opcodeIs3DPrimitive([uiIDTypes[identifier] unsignedCharValue])) { if (error) *error = @"ui_remove3d needs an existing 3D object id."; return nil; }
+            } else if (opcode == VKUIFollow3D) {
+                NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
+                NSString *target = [values[1] isKindOfClass:NSString.class] ? values[1] : nil;
+                BOOL valid = identifier.length && target.length && ![identifier isEqualToString:target] && opcodeIs3DPrimitive([uiIDTypes[identifier] unsignedCharValue]) && opcodeIs3DPrimitive([uiIDTypes[target] unsignedCharValue]) && [values[2] isKindOfClass:NSNumber.class] && [values[2] doubleValue] >= 0 && [values[2] doubleValue] <= 10000;
+                if (!valid) { if (error) *error = @"ui_follow3d needs two different 3D object ids and speed from 0 to 10000."; return nil; }
+            } else if (opcode == VKUIAnimate3D) {
+                NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
+                BOOL valid = identifier.length && opcodeIs3DPrimitive([uiIDTypes[identifier] unsignedCharValue]);
+                for (NSUInteger component = 1; component <= 3 && valid; component++) valid = [values[component] isKindOfClass:NSNumber.class] && fabs([values[component] doubleValue]) <= 10000;
+                valid = valid && [values[4] isKindOfClass:NSNumber.class] && [values[4] doubleValue] >= 0.1 && [values[4] doubleValue] <= 3600;
+                if (!valid) { if (error) *error = @"ui_animate3d needs a 3D object id, three offsets, and duration from 0.1 to 3600 seconds."; return nil; }
             } else if (opcode == VKUIKeyMove3D) {
                 NSString *identifier = [values[0] isKindOfClass:NSString.class] ? values[0] : nil;
                 NSString *key = [values[1] isKindOfClass:NSString.class] ? values[1] : nil;
@@ -1421,6 +1572,22 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             if (!ok) { if (error) *error = [NSString stringWithUTF8String:message]; return nil; }
             continue;
         }
+        if (opcode == VKSave || opcode == VKLoad) {
+            id path = valueOf(operands[0], variables, &runtimeError);
+            if (runtimeError || ![path isKindOfClass:NSString.class]) {
+                if (error) *error = runtimeError ?: @"Game save paths must be text.";
+                return nil;
+            }
+            BOOL ok = opcode == VKSave ? VKSaveGameState(variables, path, error) : VKLoadGameState(variables, path, error);
+            if (!ok) return nil;
+            continue;
+        }
+        if (opcode >= VKTrack && opcode <= VKTrackReset) {
+            id trackedValue = operands.count > 1 ? valueOf(operands[1], variables, &runtimeError) : nil;
+            if (runtimeError) { if (error) *error = runtimeError; return nil; }
+            if (!VKApplyTracker(opcode, variables, operands[0], trackedValue, error)) return nil;
+            continue;
+        }
         NSString *name = operands[0];
         NSCharacterSet *invalidName = [[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"] invertedSet];
         if (!name.length || [name rangeOfCharacterFromSet:invalidName].location != NSNotFound || [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[name characterAtIndex:0]]) { if (error) *error = @"Invalid variable name."; return nil; }
@@ -1471,6 +1638,14 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
             if (runtimeError) { if (error) *error = runtimeError; return nil; }
             if (![[value description] length]) { if (error) *error = @"replace requires a non-empty search string."; return nil; }
             variables[name] = [[original description] stringByReplacingOccurrencesOfString:[value description] withString:[replacement description]];
+            continue;
+        }
+        if (opcode == VKClamp) {
+            id maximum = valueOf(operands[2], variables, &runtimeError);
+            if (runtimeError) { if (error) *error = runtimeError; return nil; }
+            if (![original isKindOfClass:NSNumber.class] || ![value isKindOfClass:NSNumber.class] || ![maximum isKindOfClass:NSNumber.class]) { if (error) *error = @"Numeric operation requires numbers."; return nil; }
+            if ([value doubleValue] > [maximum doubleValue]) { if (error) *error = @"clamp requires minimum not greater than maximum."; return nil; }
+            variables[name] = @(fmax([value doubleValue], fmin([original doubleValue], [maximum doubleValue])));
             continue;
         }
         if (opcode == VKEqual || opcode == VKNotEqual) { variables[name] = @((opcode == VKEqual) == [original isEqual:value]); continue; }
@@ -1572,9 +1747,21 @@ static BOOL opcodeHasNoName(VKOpcode opcode) {
         NSString *runtimeError = nil;
         id value = operands.count > 1 ? valueOf(operands[1], variables, &runtimeError) : nil;
         if (runtimeError) { if (error) *error = runtimeError; return nil; }
+        if (opcode >= VKTrack && opcode <= VKTrackReset) {
+            if (!VKApplyTracker(opcode, variables, operands[0], value, error)) return nil;
+            continue;
+        }
         if (opcode == VKText) { variables[name] = [value description]; continue; }
         if (opcode == VKSet) { variables[name] = value; continue; }
         if (!original) { if (error) *error = [NSString stringWithFormat:@"Unknown variable $%@.", name]; return nil; }
+        if (opcode == VKClamp) {
+            id maximum = valueOf(operands[2], variables, &runtimeError);
+            if (runtimeError) { if (error) *error = runtimeError; return nil; }
+            if (![original isKindOfClass:NSNumber.class] || ![value isKindOfClass:NSNumber.class] || ![maximum isKindOfClass:NSNumber.class]) { if (error) *error = @"Numeric callback operations require numbers."; return nil; }
+            if ([value doubleValue] > [maximum doubleValue]) { if (error) *error = @"clamp requires minimum not greater than maximum."; return nil; }
+            variables[name] = @(fmax([value doubleValue], fmin([original doubleValue], [maximum doubleValue])));
+            continue;
+        }
         if (opcode == VKEqual || opcode == VKNotEqual) { variables[name] = @((opcode == VKEqual) == [original isEqual:value]); continue; }
         if (![original isKindOfClass:NSNumber.class] || (value && ![value isKindOfClass:NSNumber.class])) {
             if (error) *error = @"Numeric callback operations require numbers.";

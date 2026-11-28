@@ -22,7 +22,8 @@ typedef NS_ENUM(uint8_t, VKOpcode) {
 VKUIMesh3D,
 		VKEncode, VKDecode, VKCodecList,
 		VKAIConfigure, VKTrain, VKAIClear, VKAIAsk,
-		VKUIKeyMove3D, VKUIVoxel3D, VKUIVoxelControls3D, VKUIRemove3D
+		VKUIKeyMove3D, VKUIVoxel3D, VKUIVoxelControls3D, VKUIRemove3D, VKUIFollow3D, VKUIAnimate3D, VKClamp, VKNetPeerCount,
+		VKTrack, VKTrackAdd, VKTrackCount, VKTrackMin, VKTrackMax, VKTrackReset, VKSave, VKLoad
 };
 
 @interface VKEngine : NSObject

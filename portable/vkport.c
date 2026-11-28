@@ -7,16 +7,19 @@
 #endif
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <sodium.h>
 #include "vkcodec.h"
 #include "vkai.h"
-#define VK_VERSION "1.4.2"
+#include "../third_party/cjson/cJSON.h"
+#define VK_VERSION "1.5.0"
 #ifdef _WIN32
 #define strcasecmp _stricmp
 #else
@@ -29,6 +32,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <direct.h>
+#include <io.h>
 #define getcwd _getcwd
 typedef SOCKET VkSocket;
 #define VK_INVALID_SOCKET INVALID_SOCKET
@@ -63,7 +67,8 @@ enum {
     OP_UIMESH3D,
     OP_ENCODE, OP_DECODE, OP_CODECLIST,
     OP_AICONFIGURE, OP_TRAIN, OP_AICLEAR, OP_AIASK,
-    OP_UIKEYMOVE3D, OP_UIVOXEL3D, OP_UIVOXELCONTROLS3D, OP_UIREMOVE3D
+    OP_UIKEYMOVE3D, OP_UIVOXEL3D, OP_UIVOXELCONTROLS3D, OP_UIREMOVE3D, OP_UIFOLLOW3D, OP_UIANIMATE3D, OP_CLAMP, OP_NETPEERCOUNT,
+    OP_TRACK, OP_TRACKADD, OP_TRACKCOUNT, OP_TRACKMIN, OP_TRACKMAX, OP_TRACKRESET, OP_SAVE, OP_LOAD
 };
 
 typedef struct { const char *aliases; int opcode; int arity; } Definition;
@@ -135,7 +140,13 @@ static const Definition definitions[] = {
     {"ai_clear clear_knowledge ai_forget", OP_AICLEAR, 0}, {"ai_ask ask_ai ai_query", OP_AIASK, 2},
     {"ui_keymove3d keymove3d game_keymove3d", OP_UIKEYMOVE3D, 5},
     {"ui_voxel3d", OP_UIVOXEL3D, 4}, {"ui_voxel_controls3d", OP_UIVOXELCONTROLS3D, 2},
-    {"ui_remove3d", OP_UIREMOVE3D, 1}
+    {"ui_remove3d", OP_UIREMOVE3D, 1}, {"ui_follow3d follow3d game_follow3d", OP_UIFOLLOW3D, 3},
+    {"ui_animate3d animate3d game_animate3d", OP_UIANIMATE3D, 5}, {"clamp clamp_number limit_range", OP_CLAMP, 3},
+    {"net_peer_count network_peer_count", OP_NETPEERCOUNT, 1},
+    {"track track_set game_track", OP_TRACK, 2}, {"track_add game_track_add", OP_TRACKADD, 2},
+    {"track_count game_track_count", OP_TRACKCOUNT, 1}, {"track_min game_track_min", OP_TRACKMIN, 2},
+    {"track_max game_track_max", OP_TRACKMAX, 2}, {"track_reset game_track_reset", OP_TRACKRESET, 1},
+    {"save save_game game_save", OP_SAVE, 1}, {"load load_game game_load", OP_LOAD, 1}
 };
 #define DEFINITION_COUNT (sizeof(definitions) / sizeof(definitions[0]))
 
@@ -264,7 +275,7 @@ static int compile_source(const char *source, size_t length, Buffer *out, char *
                        command.opcode == OP_UIID || command.opcode == OP_UIBIND ||
                        (command.opcode >= OP_UISCENE3D && command.opcode <= OP_UISPIN3D) ||
                        (command.opcode >= OP_UISCENE2D && command.opcode <= OP_UIKEYMOVE2D) ||
-                       (command.opcode >= OP_UIPHYSICS2D && command.opcode <= OP_UIMESH3D) || (command.opcode >= OP_UIKEYMOVE3D && command.opcode <= OP_UIREMOVE3D)) {
+                       (command.opcode >= OP_UIPHYSICS2D && command.opcode <= OP_UIMESH3D) || (command.opcode >= OP_UIKEYMOVE3D && command.opcode <= OP_UIANIMATE3D)) {
                 saw_ui = 1;
                 if (!imported_ui) {
                     snprintf(message, message_size, "Line %zu: Add import ui before using UI instructions.", line_number);
@@ -459,6 +470,174 @@ static int assign(Variables *variables, const char *name, Value *value) {
     target->value = *value;
     value->text = NULL; value->is_number = 0;
     return 1;
+}
+
+static void variables_clear(Variables *variables) {
+    for (size_t index = 0; index < variables->count; index++) {
+        free(variables->items[index].name);
+        value_clear(&variables->items[index].value);
+    }
+    free(variables->items);
+    variables->items = NULL;
+    variables->count = 0;
+}
+
+static int save_game_state(const Variables *variables, const char *path, char *message, size_t size) {
+    if (!path || !*path || strlen(path) > 4096) { snprintf(message, size, "save needs a nonempty file path of at most 4096 characters."); return 0; }
+    if (variables->count > 4096) { snprintf(message, size, "Game state exceeds the 4096-variable limit."); return 0; }
+    cJSON *root = cJSON_CreateObject();
+    cJSON *saved = cJSON_CreateObject();
+    if (!root || !saved || !cJSON_AddStringToObject(root, "format", "VKGS") ||
+        !cJSON_AddNumberToObject(root, "version", 1) || !cJSON_AddItemToObject(root, "variables", saved)) {
+        cJSON_Delete(root);
+        cJSON_Delete(saved);
+        snprintf(message, size, "Could not encode game state.");
+        return 0;
+    }
+    for (size_t index = 0; index < variables->count; index++) {
+        const Variable *variable = &variables->items[index];
+        cJSON *value = variable->value.is_number
+            ? (isfinite(variable->value.number) ? cJSON_CreateNumber(variable->value.number) : NULL)
+            : cJSON_CreateString(variable->value.text ? variable->value.text : "");
+        if (!value || !cJSON_AddItemToObject(saved, variable->name, value)) {
+            cJSON_Delete(root);
+            snprintf(message, size, "Could not encode game state.");
+            return 0;
+        }
+    }
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) { snprintf(message, size, "Could not encode game state."); return 0; }
+    size_t json_length = strlen(json);
+    if (json_length > 1024u * 1024u) {
+        cJSON_free(json);
+        snprintf(message, size, "Game save exceeds the 1 MiB limit.");
+        return 0;
+    }
+    size_t path_length = strlen(path);
+    char *temporary_path = malloc(path_length + 30);
+    unsigned char random_suffix[8];
+    char suffix[sizeof(random_suffix) * 2 + 1];
+    randombytes_buf(random_suffix, sizeof(random_suffix));
+    sodium_bin2hex(suffix, sizeof(suffix), random_suffix, sizeof(random_suffix));
+    if (!temporary_path) { cJSON_free(json); snprintf(message, size, "Could not allocate game save path."); return 0; }
+    snprintf(temporary_path, path_length + 30, "%s.tmp-%s", path, suffix);
+    FILE *file = fopen(temporary_path, "wbx");
+    if (!file) {
+        snprintf(message, size, "Could not create temporary game save: %s.", strerror(errno));
+        free(temporary_path); cJSON_free(json); return 0;
+    }
+    int written = fwrite(json, 1, json_length, file) == json_length && fflush(file) == 0;
+    if (fclose(file) != 0) written = 0;
+    int replaced = 0;
+    if (written) {
+#ifdef _WIN32
+        replaced = MoveFileExA(temporary_path, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        replaced = rename(temporary_path, path) == 0;
+#endif
+    }
+    if (!written || !replaced) {
+        if (written) snprintf(message, size, "Could not replace game save: %s.", strerror(errno));
+        else snprintf(message, size, "Could not write game save.");
+        remove(temporary_path);
+    }
+    free(temporary_path);
+    cJSON_free(json);
+    return written && replaced;
+}
+
+static int load_game_state(Variables *variables, const char *path, char *message, size_t size) {
+    if (!path || !*path || strlen(path) > 4096) { snprintf(message, size, "load needs a nonempty file path of at most 4096 characters."); return 0; }
+    FILE *file = fopen(path, "rb");
+    if (!file) { snprintf(message, size, "Could not read game save: %s.", strerror(errno)); return 0; }
+    if (fseek(file, 0, SEEK_END) != 0) { fclose(file); snprintf(message, size, "Could not read game save."); return 0; }
+    long file_length = ftell(file);
+    if (file_length < 0 || (unsigned long)file_length > 1024u * 1024u) {
+        fclose(file);
+        snprintf(message, size, file_length < 0 ? "Could not read game save." : "Game save exceeds the 1 MiB limit.");
+        return 0;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) { fclose(file); snprintf(message, size, "Could not read game save."); return 0; }
+    char *contents = malloc((size_t)file_length + 1);
+    if (!contents) { fclose(file); snprintf(message, size, "Could not allocate game save data."); return 0; }
+    size_t bytes_read = fread(contents, 1, (size_t)file_length, file);
+    int read_ok = bytes_read == (size_t)file_length && !ferror(file);
+    fclose(file);
+    if (!read_ok) { free(contents); snprintf(message, size, "Could not read game save."); return 0; }
+    contents[file_length] = '\0';
+    if (strstr(contents, "\\u0000")) {
+        free(contents);
+        snprintf(message, size, "Game saves cannot contain NUL characters.");
+        return 0;
+    }
+    const char *parse_end = NULL;
+    cJSON *root = cJSON_ParseWithLengthOpts(contents, (size_t)file_length + 1, &parse_end, 1);
+    int trailing_content = 0;
+    while (parse_end && *parse_end && isspace((unsigned char)*parse_end)) parse_end++;
+    if (parse_end && *parse_end) trailing_content = 1;
+    free(contents);
+    const cJSON *format = root ? cJSON_GetObjectItemCaseSensitive(root, "format") : NULL;
+    const cJSON *version = root ? cJSON_GetObjectItemCaseSensitive(root, "version") : NULL;
+    const cJSON *saved = root ? cJSON_GetObjectItemCaseSensitive(root, "variables") : NULL;
+    if (!root || trailing_content || !cJSON_IsObject(root) || !cJSON_IsString(format) || strcmp(format->valuestring, "VKGS") ||
+        !cJSON_IsNumber(version) || version->valuedouble != 1 || !cJSON_IsObject(saved) ||
+        cJSON_GetArraySize(saved) > 4096) {
+        cJSON_Delete(root);
+        snprintf(message, size, "Invalid Vektkove game save.");
+        return 0;
+    }
+    Variables restored = {0};
+    int valid = 1;
+    for (const cJSON *item = saved->child; item && valid; item = item->next) {
+        Value value = {0};
+        if (!valid_name(item->string) || find_variable(&restored, item->string)) valid = 0;
+        else if (cJSON_IsNumber(item) && isfinite(item->valuedouble)) { value.is_number = 1; value.number = item->valuedouble; }
+        else if (cJSON_IsString(item) && item->valuestring && valid_utf8((const unsigned char *)item->valuestring, strlen(item->valuestring))) value.text = copy_text(item->valuestring, strlen(item->valuestring));
+        else valid = 0;
+        if (valid && !value.is_number && !value.text) valid = 0;
+        if (valid && !assign(&restored, item->string, &value)) valid = 0;
+        value_clear(&value);
+    }
+    cJSON_Delete(root);
+    if (!valid) {
+        variables_clear(&restored);
+        snprintf(message, size, "Invalid variable in Vektkove game save.");
+        return 0;
+    }
+    variables_clear(variables);
+    *variables = restored;
+    return 1;
+}
+
+static int apply_tracker(int opcode, Variables *variables, const char *name, Value *value, char *message, size_t size) {
+    if (!valid_name(name)) { snprintf(message, size, "Invalid game tracker name."); return 0; }
+    Variable *current = find_variable(variables, name);
+    if (opcode == OP_TRACK) return assign(variables, name, value);
+    if (opcode == OP_TRACKRESET) {
+        Value reset = {1, 0, NULL};
+        return assign(variables, name, &reset);
+    }
+    if (opcode == OP_TRACKCOUNT || opcode == OP_TRACKADD) {
+        double amount = opcode == OP_TRACKCOUNT ? 1 : value->is_number ? value->number : NAN;
+        if ((current && !current->value.is_number) || !isfinite(amount)) {
+            snprintf(message, size, "Numeric game trackers require numeric values.");
+            return 0;
+        }
+        double result = (current ? current->value.number : 0) + amount;
+        if (!isfinite(result)) { snprintf(message, size, "Game tracker value must remain finite."); return 0; }
+        Value updated = {1, result, NULL};
+        return assign(variables, name, &updated);
+    }
+    if (!value->is_number || (current && !current->value.is_number)) {
+        snprintf(message, size, "Numeric game trackers require numeric values.");
+        return 0;
+    }
+    double result = !current ? value->number : opcode == OP_TRACKMIN
+        ? fmin(current->value.number, value->number) : fmax(current->value.number, value->number);
+    if (!isfinite(result)) { snprintf(message, size, "Game tracker value must remain finite."); return 0; }
+    Value updated = {1, result, NULL};
+    return assign(variables, name, &updated);
 }
 
 static void release_instructions(Instruction *instructions, size_t count) {
@@ -699,7 +878,7 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             imported_ui = 1;
             continue;
         }
-        int is_ui = (op >= OP_WINDOW && op <= OP_UIINPUT) || (op >= OP_UICOLOR && op <= OP_UIAUTOTURN) || op == OP_UIID || op == OP_UIBIND || (op >= OP_UISCENE3D && op <= OP_UISPIN3D) || (op >= OP_UISCENE2D && op <= OP_UIKEYMOVE2D) || (op >= OP_UIPHYSICS2D && op <= OP_UIMESH3D) || (op >= OP_UIKEYMOVE3D && op <= OP_UIREMOVE3D);
+        int is_ui = (op >= OP_WINDOW && op <= OP_UIINPUT) || (op >= OP_UICOLOR && op <= OP_UIAUTOTURN) || op == OP_UIID || op == OP_UIBIND || (op >= OP_UISCENE3D && op <= OP_UISPIN3D) || (op >= OP_UISCENE2D && op <= OP_UIKEYMOVE2D) || (op >= OP_UIPHYSICS2D && op <= OP_UIMESH3D) || (op >= OP_UIKEYMOVE3D && op <= OP_UIANIMATE3D);
         if (is_ui && !imported_ui) { snprintf(message, size, "Add 'import ui' before using UI instructions."); goto done; }
         if (op == OP_SERVERSCRIPT || op == OP_LOCALSCRIPT) {
             if (script_role || index != 0) { snprintf(message, size, "Declare one script role as the first instruction."); goto done; }
@@ -707,8 +886,14 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             continue;
         }
         if (script_role == OP_SERVERSCRIPT && is_ui) { snprintf(message, size, "Server scripts cannot create UI."); goto done; }
-        if (op >= OP_NETLISTEN && op <= OP_NETBROADCAST) {
+        if ((op >= OP_NETLISTEN && op <= OP_NETBROADCAST) || op == OP_NETPEERCOUNT) {
             if (!script_role) { snprintf(message, size, "Declare server_script or local_script before networking."); goto done; }
+            if (op == OP_NETPEERCOUNT) {
+                if (!valid_name(ins->operands[0])) { snprintf(message, size, "Invalid variable name for net_peer_count."); goto done; }
+                Value count_value = {1, (double)(network_client_count + (network_socket != VK_INVALID_SOCKET ? 1 : 0)), NULL};
+                if (!assign(&variables, ins->operands[0], &count_value)) goto done;
+                continue;
+            }
             if (op == OP_NETLISTEN && script_role != OP_SERVERSCRIPT) { snprintf(message, size, "net_listen requires server_script."); goto done; }
             if (op == OP_NETCONNECT && script_role != OP_LOCALSCRIPT) { snprintf(message, size, "net_connect requires local_script."); goto done; }
             if (op == OP_NETLISTENMULTI && script_role != OP_SERVERSCRIPT) { snprintf(message, size, "net_listen_multi requires server_script."); goto done; }
@@ -991,13 +1176,14 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                 int callback_op = code[callback].opcode;
                 int allowed = callback_op == OP_TEXT || callback_op == OP_SET || callback_op == OP_ADD || callback_op == OP_SUB ||
                     callback_op == OP_MUL || callback_op == OP_DIV || callback_op == OP_MOD || callback_op == OP_POW ||
-                    callback_op == OP_MIN || callback_op == OP_MAX || callback_op == OP_EQ || callback_op == OP_NE ||
+                    callback_op == OP_MIN || callback_op == OP_MAX || callback_op == OP_CLAMP || callback_op == OP_EQ || callback_op == OP_NE ||
                     callback_op == OP_LT || callback_op == OP_LE || callback_op == OP_GT || callback_op == OP_GE ||
                     callback_op == OP_NOT || callback_op == OP_AND || callback_op == OP_OR || callback_op == OP_NEG ||
                     callback_op == OP_ABS || callback_op == OP_ROUND || callback_op == OP_FLOOR || callback_op == OP_CEIL ||
                     callback_op == OP_SQRT || callback_op == OP_SIN || callback_op == OP_COS || callback_op == OP_TAN ||
                     callback_op == OP_ASIN || callback_op == OP_ACOS || callback_op == OP_ATAN || callback_op == OP_LOG ||
                     callback_op == OP_LOG10 || callback_op == OP_EXP || callback_op == OP_SIGN || callback_op == OP_TRUNC ||
+                    (callback_op >= OP_TRACK && callback_op <= OP_TRACKRESET) ||
                     callback_op == OP_LABEL || callback_op == OP_JUMP || callback_op == OP_IF || callback_op == OP_UNLESS ||
                     callback_op == OP_UIMOVE2D || callback_op == OP_UIFORCE2D || callback_op == OP_UISETVELOCITY2D ||
                     callback_op == OP_UIMOVE3D || callback_op == OP_UIFORCE3D || callback_op == OP_UISETVELOCITY3D || callback_op == OP_UIREMOVE3D;
@@ -1069,7 +1255,7 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             last_ui_op = op;
             continue;
         }
-        if ((op >= OP_UIPHYSICS3D && op <= OP_UIVELOCITY3D) || (op >= OP_UIKEYMOVE3D && op <= OP_UIREMOVE3D)) {
+        if ((op >= OP_UIPHYSICS3D && op <= OP_UIVELOCITY3D) || (op >= OP_UIKEYMOVE3D && op <= OP_UIANIMATE3D)) {
             if (!has_scene3d) { snprintf(message, size, "Add ui_scene3d before 3D physics instructions."); goto done; }
             Value parts[5] = {{0}};
             int good = 1;
@@ -1095,6 +1281,20 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
                 size_t id = 0;
                 while (good && id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[id], parts[0].text ? parts[0].text : ""))) id++;
                 if (!good || id == ui_id_count || !((ui_id_types[id] >= OP_UIBOX3D && ui_id_types[id] <= OP_UIPLANE3D) || ui_id_types[id] == OP_UIMESH3D)) { snprintf(message, size, "ui_remove3d needs an existing 3D object id."); good = 0; }
+            } else if (op == OP_UIFOLLOW3D) {
+                size_t first = 0, target = 0;
+                while (good && first < ui_id_count && (parts[0].is_number || strcmp(ui_ids[first], parts[0].text ? parts[0].text : ""))) first++;
+                while (good && target < ui_id_count && (parts[1].is_number || strcmp(ui_ids[target], parts[1].text ? parts[1].text : ""))) target++;
+                int valid_first = first < ui_id_count && ((ui_id_types[first] >= OP_UIBOX3D && ui_id_types[first] <= OP_UIPLANE3D) || ui_id_types[first] == OP_UIMESH3D);
+                int valid_target = target < ui_id_count && ((ui_id_types[target] >= OP_UIBOX3D && ui_id_types[target] <= OP_UIPLANE3D) || ui_id_types[target] == OP_UIMESH3D);
+                if (!good || !valid_first || !valid_target || first == target || !parts[2].is_number || parts[2].number < 0 || parts[2].number > 10000) { snprintf(message, size, "ui_follow3d needs two different 3D object ids and speed from 0 to 10000."); good = 0; }
+            } else if (op == OP_UIANIMATE3D) {
+                size_t id = 0;
+                while (good && id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[id], parts[0].text ? parts[0].text : ""))) id++;
+                int valid = good && id < ui_id_count && ((ui_id_types[id] >= OP_UIBOX3D && ui_id_types[id] <= OP_UIPLANE3D) || ui_id_types[id] == OP_UIMESH3D);
+                for (size_t component = 1; component <= 3 && valid; component++) valid = parts[component].is_number && fabs(parts[component].number) <= 10000;
+                valid = valid && parts[4].is_number && parts[4].number >= 0.1 && parts[4].number <= 3600;
+                if (!valid) { snprintf(message, size, "ui_animate3d needs a 3D object id, three offsets, and duration from 0.1 to 3600 seconds."); good = 0; }
             } else if (op == OP_UIKEYMOVE3D) {
                 size_t id = 0;
                 while (good && id < ui_id_count && (parts[0].is_number || strcmp(ui_ids[id], parts[0].text ? parts[0].text : ""))) id++;
@@ -1300,6 +1500,28 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             if (!good) goto done;
             continue;
         }
+        if (op == OP_SAVE || op == OP_LOAD) {
+            Value path = {0};
+            int good = resolve(ins->operands[0], &variables, &path, message, size);
+            if (good && (path.is_number || !path.text || !path.text[0])) {
+                snprintf(message, size, "Game save paths must be nonempty text.");
+                good = 0;
+            }
+            if (good) good = op == OP_SAVE
+                ? save_game_state(&variables, path.text, message, size)
+                : load_game_state(&variables, path.text, message, size);
+            value_clear(&path);
+            if (!good) goto done;
+            continue;
+        }
+        if (op >= OP_TRACK && op <= OP_TRACKRESET) {
+            Value tracked = {0};
+            int good = ins->count > 1 ? resolve(ins->operands[1], &variables, &tracked, message, size) : 1;
+            if (good) good = apply_tracker(op, &variables, ins->operands[0], &tracked, message, size);
+            value_clear(&tracked);
+            if (!good) goto done;
+            continue;
+        }
         const char *name = ins->operands[0];
         if (!valid_name(name)) { snprintf(message, size, "Invalid variable name."); goto done; }
         Variable *original = find_variable(&variables, name);
@@ -1316,6 +1538,16 @@ static int run_bytecode(const unsigned char *data, size_t length, Buffer *output
             continue;
         }
         if (!original) { snprintf(message, size, "Unknown variable $%s.", name); value_clear(&value); goto done; }
+        if (op == OP_CLAMP) {
+            Value maximum = {0};
+            if (!resolve(ins->operands[2], &variables, &maximum, message, size)) { value_clear(&value); goto done; }
+            if (!original->value.is_number || !value.is_number || !maximum.is_number) { snprintf(message, size, "Numeric operation requires numbers."); value_clear(&value); value_clear(&maximum); goto done; }
+            if (value.number > maximum.number) { snprintf(message, size, "clamp requires minimum not greater than maximum."); value_clear(&value); value_clear(&maximum); goto done; }
+            Value bounded = {1, fmax(value.number, fmin(original->value.number, maximum.number)), NULL};
+            value_clear(&value); value_clear(&maximum);
+            if (!assign(&variables, name, &bounded)) goto done;
+            continue;
+        }
         Value result = {0};
         int handled = 1;
         char *original_text = value_text(&original->value), *operand_text = ins->count > 1 ? value_text(&value) : NULL;
@@ -1419,6 +1651,7 @@ static int read_file(const char *path, Buffer *buffer) {
     while ((got = fread(chunk, 1, sizeof(chunk), file)) > 0) {
         if (buffer->size + got > 64u * 1024u * 1024u || !buffer_append(buffer, chunk, got)) { fclose(file); fprintf(stderr, "File too large.\n"); return 0; }
     }
+    if (ferror(file)) { fclose(file); fprintf(stderr, "Could not read file.\n"); return 0; }
     fclose(file);
     return 1;
 }
@@ -1528,15 +1761,15 @@ static void *vk_chat_receiver_thread(void *context) {
 }
 #endif
 
-static int vk_read_passphrase(char passphrase[1024]) {
-    const char *environment = getenv("VEKTKOVE_CHAT_PASSPHRASE");
+static int vk_read_passphrase(char passphrase[1024], const char *environment_name, const char *purpose) {
+    const char *environment = getenv(environment_name);
     if (environment) {
         size_t length = strlen(environment);
-        if (length < 12 || length >= 1024) { fprintf(stderr, "Chat passphrase must be 12 to 1023 bytes.\n"); return 0; }
+        if (length < 12 || length >= 1024) { fprintf(stderr, "%s passphrase must be 12 to 1023 bytes.\n", purpose); return 0; }
         memcpy(passphrase, environment, length + 1);
         return 1;
     }
-    fprintf(stderr, "VKLINK passphrase (12+ characters): ");
+    fprintf(stderr, "%s passphrase (12+ characters): ", purpose);
     fflush(stderr);
 #ifdef _WIN32
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
@@ -1558,13 +1791,73 @@ static int vk_read_passphrase(char passphrase[1024]) {
     if (!result) { fprintf(stderr, "Could not read passphrase.\n"); return 0; }
     if (strlen(passphrase) == 1023 && passphrase[1022] != '\n') {
         sodium_memzero(passphrase, 1024);
-        fprintf(stderr, "Chat passphrase must be at most 1022 bytes.\n");
+        fprintf(stderr, "%s passphrase must be at most 1022 bytes.\n", purpose);
         return 0;
     }
     passphrase[strcspn(passphrase, "\r\n")] = '\0';
     size_t length = strlen(passphrase);
-    if (length < 12) { sodium_memzero(passphrase, 1024); fprintf(stderr, "Chat passphrase must be at least 12 bytes.\n"); return 0; }
+    if (length < 12) { sodium_memzero(passphrase, 1024); fprintf(stderr, "%s passphrase must be at least 12 bytes.\n", purpose); return 0; }
     return 1;
+}
+
+static int vk_game_archive(int argc, char **argv, int encrypting) {
+    static const unsigned char magic[8] = {'V', 'K', 'G', 'A', 'M', 'E', '0', '1'};
+    enum { HEADER_SIZE = 8 + crypto_pwhash_SALTBYTES + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES };
+    if (argc != 4) { fprintf(stderr, "Usage: vk encrypt-game input-archive output | vk decrypt-game input output-archive\n"); return 1; }
+    if (sodium_init() < 0) { fprintf(stderr, "libsodium initialization failed.\n"); return 1; }
+    Buffer input = {0};
+    if (!read_file(argv[2], &input)) { free(input.data); return 1; }
+    if ((encrypting && input.size > 64u * 1024u * 1024u - HEADER_SIZE - crypto_aead_xchacha20poly1305_ietf_ABYTES) ||
+        (!encrypting && (input.size < HEADER_SIZE + crypto_aead_xchacha20poly1305_ietf_ABYTES || memcmp(input.data, magic, sizeof(magic))))) {
+        fprintf(stderr, "Invalid or oversized game archive.\n"); free(input.data); return 1;
+    }
+    char passphrase[1024] = {0}, confirmation[1024] = {0};
+    if (!vk_read_passphrase(passphrase, "VEKTKOVE_GAME_PASSPHRASE", "Game")) { free(input.data); return 1; }
+    if (encrypting && !getenv("VEKTKOVE_GAME_PASSPHRASE")) {
+        if (!vk_read_passphrase(confirmation, "VEKTKOVE_GAME_PASSPHRASE", "Confirm game") || strcmp(passphrase, confirmation)) {
+            fprintf(stderr, "Passphrases do not match.\n"); sodium_memzero(passphrase, sizeof(passphrase)); sodium_memzero(confirmation, sizeof(confirmation)); free(input.data); return 1;
+        }
+    }
+    sodium_memzero(confirmation, sizeof(confirmation));
+    unsigned char header[HEADER_SIZE], key[crypto_aead_xchacha20poly1305_ietf_KEYBYTES];
+    if (encrypting) { memcpy(header, magic, sizeof(magic)); randombytes_buf(header + sizeof(magic), HEADER_SIZE - sizeof(magic)); }
+    else memcpy(header, input.data, HEADER_SIZE);
+    if (crypto_pwhash(key, sizeof(key), passphrase, strlen(passphrase), header + sizeof(magic), crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_INTERACTIVE, crypto_pwhash_ALG_ARGON2ID13) != 0) {
+        fprintf(stderr, "Could not derive game encryption key.\n"); sodium_memzero(passphrase, sizeof(passphrase)); free(input.data); return 1;
+    }
+    sodium_memzero(passphrase, sizeof(passphrase));
+    size_t capacity = encrypting ? input.size + crypto_aead_xchacha20poly1305_ietf_ABYTES : input.size - HEADER_SIZE - crypto_aead_xchacha20poly1305_ietf_ABYTES;
+    unsigned char *output = malloc(capacity ? capacity : 1);
+    unsigned long long output_length = 0;
+    int ok = output != NULL;
+    if (ok && encrypting) ok = crypto_aead_xchacha20poly1305_ietf_encrypt(output, &output_length, input.data ? input.data : (const unsigned char *)"", input.size, header, sizeof(header), NULL, header + sizeof(magic) + crypto_pwhash_SALTBYTES, key) == 0;
+    else if (ok) ok = crypto_aead_xchacha20poly1305_ietf_decrypt(output, &output_length, NULL, input.data + HEADER_SIZE, input.size - HEADER_SIZE, header, sizeof(header), header + sizeof(magic) + crypto_pwhash_SALTBYTES, key) == 0;
+    sodium_memzero(key, sizeof(key));
+    if (input.data) { sodium_memzero(input.data, input.size); free(input.data); }
+    if (!ok) { fprintf(stderr, "Game encryption failed or authentication failed.\n"); if (output) { sodium_memzero(output, capacity); free(output); } return 1; }
+#ifdef _WIN32
+    int descriptor = _open(argv[3], _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
+    FILE *file = descriptor < 0 ? NULL : _fdopen(descriptor, "wb");
+#else
+    int descriptor = open(argv[3], O_WRONLY | O_CREAT | O_EXCL, 0600);
+    FILE *file = descriptor < 0 ? NULL : fdopen(descriptor, "wb");
+#endif
+    if (!file) {
+        if (descriptor >= 0) {
+#ifdef _WIN32
+            _close(descriptor);
+#else
+            close(descriptor);
+#endif
+            remove(argv[3]);
+        }
+        fprintf(stderr, "Could not create output; it may already exist.\n"); sodium_memzero(output, capacity); free(output); return 1;
+    }
+    ok = (!encrypting || fwrite(header, 1, sizeof(header), file) == sizeof(header)) && fwrite(output, 1, (size_t)output_length, file) == (size_t)output_length;
+    if (fclose(file) != 0) ok = 0;
+    sodium_memzero(output, capacity); free(output);
+    if (!ok) { remove(argv[3]); fprintf(stderr, "Could not write game archive.\n"); return 1; }
+    return 0;
 }
 
 static int vk_chat_session(VkSocket socket, int server, const char *passphrase) {
@@ -1698,7 +1991,7 @@ static int vk_chat(int argc, char **argv) {
     if (!end || *end || port == 0 || port > 65535) { fprintf(stderr, "Port must be from 1 to 65535.\n"); return 1; }
     if (sodium_init() < 0) { fprintf(stderr, "libsodium initialization failed.\n"); return 1; }
     char passphrase[1024] = {0};
-    if (!vk_read_passphrase(passphrase)) return 1;
+    if (!vk_read_passphrase(passphrase, "VEKTKOVE_CHAT_PASSPHRASE", "VKLINK")) return 1;
 #ifdef _WIN32
     WSADATA data;
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) { fprintf(stderr, "Winsock startup failed.\n"); return 1; }
@@ -1773,13 +2066,14 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
-        puts("Vektkove " VK_VERSION "\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk check file.vk\n       vk ast file.vk\n       vk score file.vk\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk formats\n       vk keyword-count\n       vk chat listen|connect address port\n       vk --version\n\nFORMAT is a codec or a chain such as zstd+base64. UI instructions are validated but require the macOS app to display.");
+        puts("Vektkove " VK_VERSION "\nUsage: vk run file.vk|file.vkb\n       vk compile file.vk out.vkb\n       vk check file.vk\n       vk ast file.vk\n       vk score file.vk\n       vk encode FORMAT [input|-] [output|-]\n       vk decode FORMAT [input|-] [output|-]\n       vk encrypt-game archive output\n       vk decrypt-game input archive\n       vk formats\n       vk keyword-count\n       vk chat listen|connect address port\n       vk --version\n\nFORMAT is a codec or a chain such as zstd+base64. UI instructions are validated but require the macOS app to display.");
         return 0;
     }
     if (argc == 2 && !strcmp(argv[1], "formats")) { puts(vkc_format_list()); return 0; }
     if (argc >= 3 && argc <= 5 && (!strcmp(argv[1], "encode") || !strcmp(argv[1], "decode")))
         return vkc_cli(!strcmp(argv[1], "encode"), argv[2], argc > 3 ? argv[3] : NULL, argc > 4 ? argv[4] : NULL);
     if (argc > 1 && !strcmp(argv[1], "chat")) return vk_chat(argc, argv);
+    if (argc > 1 && (!strcmp(argv[1], "encrypt-game") || !strcmp(argv[1], "decrypt-game"))) return vk_game_archive(argc, argv, !strcmp(argv[1], "encrypt-game"));
     if (argc == 2 && !strcmp(argv[1], "keyword-count")) {
         size_t base = 0;
         for (size_t i = 0; i < DEFINITION_COUNT; i++) {

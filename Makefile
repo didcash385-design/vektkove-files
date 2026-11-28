@@ -17,6 +17,8 @@ portable-test: vk $(SODIUM)/lib/libsodium.a
 	portable/difftest.sh /tmp/vkport-test
 	python3 portable/fuzz.py /tmp/vkport-test 300 7
 	python3 portable/chat_test.py /tmp/vkport-test
+	node portable/archive_test.mjs /tmp/vkport-test
+	node portable/game_state_test.mjs /tmp/vkport-test
 	/tmp/vkport-test compile examples/game2d.vk /tmp/vektkove-game2d-portable.vkb
 	/tmp/vkport-test compile examples/multi_server.vk /tmp/vektkove-multi-server-portable.vkb
 	/tmp/vkport-test compile examples/multi_client.vk /tmp/vektkove-multi-client-portable.vkb
@@ -53,6 +55,10 @@ engine_test: VKEngine.m VKEngine.h portable/vkcodec.h $(AI_SRC) $(AI_DEPS) engin
 	$(CC) $(CFLAGS) -framework Foundation VKEngine.m engine_test.m $(AI_SRC) -o "$@"
 
 test: all engine_test
+	@test "`./vk --version`" = "Vektkove 1.5.0"
+	@test "`./vkport --version`" = "Vektkove 1.5.0"
+	@test "`./vk run examples/codecs.vk`" = "`printf 'SGVsbG8sIFZla3Rrb3ZlIQ==\\nHello, Vektkove!\\nHello, Vektkove!\\n'`"
+	@test "`./vkport run examples/codecs.vk`" = "`printf 'SGVsbG8sIFZla3Rrb3ZlIQ==\\nHello, Vektkove!\\nHello, Vektkove!\\n'`"
 	./engine_test
 	"$(APP)" --self-test
 	"$(LAUNCHER)" --self-test
@@ -72,6 +78,11 @@ test: all engine_test
 	./vk run /tmp/vektkove-physics3d-test.vkb
 	./vk compile examples/boxphysics3d.vk /tmp/vektkove-boxphysics3d-test.vkb
 	./vk run /tmp/vektkove-boxphysics3d-test.vkb
+	./vk compile examples/entity3d.vk /tmp/vektkove-entity3d-test.vkb
+	./vk run /tmp/vektkove-entity3d-test.vkb
+	./vk check examples/game_state.vk
+	./vkport check examples/game_state.vk
+	./vk compile examples/game_state.vk /tmp/vektkove-game-state-test.vkb
 	./vk compile examples/ai.vk /tmp/vektkove-ai-example.vkb
 	./vk compile examples/game2d.vk /tmp/vektkove-game2d-test.vkb
 	./vk run /tmp/vektkove-game2d-test.vkb
@@ -82,9 +93,13 @@ test: all engine_test
 	./vkport compile examples/game2d.vk /tmp/vektkove-game2d-portable-test.vkb
 	./vkport compile examples/physics3d.vk /tmp/vektkove-physics3d-portable-test.vkb
 	./vkport compile examples/boxphysics3d.vk /tmp/vektkove-boxphysics3d-portable-test.vkb
+	./vkport compile examples/entity3d.vk /tmp/vektkove-entity3d-portable-test.vkb
+	./vkport compile examples/game_state.vk /tmp/vektkove-game-state-portable-test.vkb
 	./vkport compile examples/multi_server.vk /tmp/vektkove-multi-server-portable-test.vkb
 	./vkport compile examples/multi_client.vk /tmp/vektkove-multi-client-portable-test.vkb
 	python3 portable/chat_test.py ./vkport
+	node portable/archive_test.mjs ./vkport
+	node portable/game_state_test.mjs ./vkport
 	sh portable/net_test.sh ./vkport
-	@test `./vk keywords | wc -l | tr -d ' '` -eq 1394
+	@test `./vk keywords | wc -l | tr -d ' '` -eq 1514
 	@test "`./vkport keyword-count`" = "`./vk keywords | wc -l | tr -d ' '`"

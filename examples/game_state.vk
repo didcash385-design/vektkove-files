@@ -1,0 +1,14 @@
+track score 0
+track_count enemies_defeated
+track_add score 25
+track_max best_score $score
+track_min lowest_health 100
+track_min lowest_health 72
+out $score
+out $enemies_defeated
+out $best_score
+out $lowest_health
+save "game-save.json"
+track score 0
+load "game-save.json"
+out $score

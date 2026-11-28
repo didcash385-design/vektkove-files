@@ -1,4 +1,4 @@
-# Vektkove 1.4.2 Manual
+# Vektkove 1.5.0 Manual
 
 Vektkove is a custom programming language and native macOS editor. Source files use `.vk`; compiled programs use `.vkb`. The native interpreter is written in Objective-C and does not require JavaScript, Node.js, an account, or an internet connection.
 
@@ -67,6 +67,13 @@ The spellings in the first column are the canonical instructions. Other listed n
 | `set` | name value | Store a value, preserving number or text type. | `assign`, `store` |
 | `out` | value | Append the value and a newline to program output. | `print`, `output` |
 | `halt` | none | Stop the program. | `stop`, `end` |
+| `track` | name value | Set a named game statistic. | `track_set`, `game_track`, and prefix variants |
+| `track_add` | name amount | Add to a numeric statistic, starting at zero. | `game_track_add` and prefix variants |
+| `track_count` | name | Increment a named event counter, starting at zero. | `game_track_count` and prefix variants |
+| `track_min`, `track_max` | name value | Keep the lowest or highest numeric value seen. | `game_track_min`, `game_track_max`, and prefix variants |
+| `track_reset` | name | Reset a named tracker to zero. | `game_track_reset` and prefix variants |
+| `save` | path | Save all game variables and trackers to a JSON save file. | `save_game`, `game_save`, and prefix variants |
+| `load` | path | Replace current game variables and trackers from a validated JSON save file. | `load_game`, `game_load`, and prefix variants |
 | `label` | label | Mark a branch destination. | `mark`, `anchor` |
 | `jump` | label | Jump unconditionally. | `goto`, `branch` |
 | `if` | value label | Jump if the value is true. | `when`, `branch_if` |
@@ -80,6 +87,26 @@ The spellings in the first column are the canonical instructions. Other listed n
 Terminal utilities are interpreter built-ins, not shell execution. `terminal_run "date"` prints the UTC date in `YYYY-MM-DD` form; `terminal_run "pwd"` prints the process working directory; `terminal_run "help"` prints the allowlist. Use `terminal_echo value` for text. Unsupported `terminal_run` keywords return an error.
 
 `cite` formats only the values supplied in the instruction; it does not search for or verify the source. The author, title, and URL must be nonempty text; the year may be text or a number.
+
+### Game Stats and Save Files
+
+Tracker names are ordinary variable names, so you can edit the names in source and track multiple independent values. `track` sets a value; `track_add` and `track_count` create missing numeric trackers at zero. `track_min` and `track_max` keep the smallest or largest value seen, and `track_reset` clears a tracker. Tracker values can be read with `$name`, displayed with `out`, and updated in 2D or 3D frame callbacks. They are local program state, not telemetry.
+
+```text
+track score 0
+track_count enemies_defeated
+track_add score 25
+track_max best_score $score
+track_min lowest_health 100
+track_min lowest_health 72
+out $score
+out $enemies_defeated
+out $best_score
+out $lowest_health
+save "slot-1.json"
+```
+
+`save path` writes every current variable—including tracker values—to a versioned JSON file. `load path` validates and replaces all current variables with the file's contents; it does not merge them. Paths are relative to the process working directory. Save files are limited to 1 MiB and 4,096 variables. Save/load is plain JSON, not encryption; use the separate authenticated `encrypt-game` archive command when you need encryption at rest. See `examples/game_state.vk`.
 
 ### AI Instructions
 
@@ -118,7 +145,7 @@ Knowledge is limited to 256 KiB per program, responses to 1 MiB, questions to 32
 
 ### Encoding and Compression
 
-`encode name format` and `decode name format` transform an existing text variable. Use `codec_list` or `vk formats` to list supported formats. Text codecs include Base64, Base64URL, Base32, Base32hex, hexadecimal, Base58, ASCII85, URL, URL form, HTML, quoted-printable, ROT13, ROT47, binary, and JSON string escapes. Compression formats are DEFLATE, zlib, gzip, Zstandard, and LZ4.
+`encode name format` and `decode name format` transform an existing text variable. Use `codec_list` or `vk formats` to list supported formats. Text codecs include Base64, Base64URL, Base32, Base32hex, hexadecimal, Base58, ASCII85, URL, URL form, HTML, quoted-printable, ROT13, ROT47, binary, and JSON string escapes. Compression formats are DEFLATE, zlib, gzip, Zstandard, and LZ4. Run [examples/codecs.vk](examples/codecs.vk) for Base64 and Zstandard round trips.
 
 ```text
 text message "Hello"
@@ -318,6 +345,10 @@ FBX, glTF/GLB, STEP, YDR, DFF, TXD, and YTD are not supported on the tested macO
 
 Use `ui_keymove3d "id" "key" dx dy dz` to move a named 3D object when a key is pressed. Use `ui_remove3d "id"` to remove a named object at startup or inside a `ui_frame3d` callback. Key bindings use the same focused-window input as 2D controls; if multiple actions use the same key, the last binding takes precedence.
 
+`ui_follow3d "follower" "target" speed` moves a named object directly toward another named object at up to `speed` world units per second; speed ranges from 0 to 10,000. It stops at the target and stops moving when the target is removed. This is rule-based movement, not machine learning or obstacle pathfinding. It changes position directly before physics, so collisions and other motion can affect the final position. `ui_animate3d "id" dx dy dz seconds` loops a translation from the current position to an offset and back over 0.1 to 3,600 seconds. Animation and follow settings are saved as instructions in `.vk` source; playback starts afresh on each run. `ui_spin3d` still supplies Y-axis rotation. These are not skeletal or imported keyframe animations. See `examples/entity3d.vk`; use I/J/K/L to move the target.
+
+`clamp name minimum maximum` restricts a numeric variable to an inclusive range, including inside 2D and 3D frame callbacks. The minimum cannot exceed the maximum.
+
 Use `ui_voxel3d x y z "#RRGGBB"` to add a unit block at integer coordinates, and `ui_voxel_controls3d step "#RRGGBB"` to enable editing and choose the movement step and placed-block color. In the 3D view, use W/A/S/D to fly horizontally, E or Space to rise, Q to descend, and drag with the left mouse button to look. Left-click a block to break it; right-click its face to place a block next to it. Blocks must be within 12 world units. Duplicate block coordinates are ignored.
 
 Open `examples/voxel3d.vk` in the macOS editor and choose **Test Code** to try an interactive world. The command-line runners compile and validate the same source but do not display a window. This is a creative flying and editing foundation, not a complete survival game: voxel edits are not saved, and it has no terrain generation, inventory, player collision, or mining rules.
@@ -328,13 +359,26 @@ The 2D game scene supports bounded rectangles and circles, per-frame velocity, e
 
 Use `ui_scene2d x y width height` once after creating the window. Add rectangles with `ui_rect2d id x y width height "#RRGGBB"` and circles with `ui_circle2d id x y diameter "#RRGGBB"`. Bodies collide using axis-aligned rectangle/circle tests and impulse response. `ui_physics2d id mass restitution` sets mass (0 makes a static body) and bounce from 0 to 1; `ui_gravity2d x y` applies scene gravity. `ui_velocity2d id dx dy` sets initial velocity, and `ui_keymove2d id key dx dy` moves an object by a fixed amount on key press.
 
-One `ui_frame2d` / `ui_end_frame2d` block may contain variable updates, math, labels, branches, and `ui_move2d`, `ui_force2d`, or `ui_set_velocity2d` actions. It runs once per simulation tick with a 1,000-instruction budget. Each tick sets `delta_time`, `collision`, `collision_count`, `collision_entered`, and `collision_exited`; the transition flags let a callback react once when contact starts or ends instead of once on every colliding tick. `collision_a` and `collision_b` identify a current or just-ended pair, or are empty when there is no contact event. The UI Maker's **2D Game** starter uses this callback to count contacts and apply force to its orb. See `examples/game2d.vk` and `examples/physics3d.vk`.
+One `ui_frame2d` / `ui_end_frame2d` block may contain variable updates, math, tracker updates, labels, branches, and `ui_move2d`, `ui_force2d`, or `ui_set_velocity2d` actions. It runs once per simulation tick with a 1,000-instruction budget. Each tick sets `delta_time`, `collision`, `collision_count`, `collision_entered`, and `collision_exited`; the transition flags let a callback react once when contact starts or ends instead of once on every colliding tick. `collision_a` and `collision_b` identify a current or just-ended pair, or are empty when there is no contact event. The UI Maker's **2D Game** starter uses this callback to count contacts and apply force to its orb. See `examples/game2d.vk` and `examples/physics3d.vk`.
 
 ## Script Roles and TCP
 
 Start a server file with `server_script` or a client file with `local_script`; the role marker must be the first instruction. Server scripts cannot create UI. Use `net_listen "127.0.0.1" port` to wait for one local peer, or `net_listen "0.0.0.0" port` only when you intend to listen on all network interfaces. Local scripts use `net_connect "address" port`. `net_send value` and `net_receive variable` exchange length-prefixed UTF-8 messages up to 16 KiB; `net_close` closes the connection. Send and receive operations have a 60-second timeout.
 
 This is a blocking TCP transport, not an encrypted or authenticated multiplayer service. `net_listen_multi` accepts 2 to 16 peers; `net_receive_from` waits for a message from any accepted peer and stores its 1-based client ID and text in the named variables. Use `net_send_to` for a targeted response and `net_broadcast` to send to every peer. Do not send secrets or expose a listener to an untrusted network. For a single-peer local test, run `vk run examples/server.vk` in one terminal and `vk run examples/client.vk` in another. For two peers, run `vk run examples/multi_server.vk` and two copies of `vk run examples/multi_client.vk`. Network operations block while connecting, accepting, or waiting for a message.
+
+`net_peer_count name` stores the number of accepted or connected peer slots, or zero after `net_close`. A single connection counts as one; a multi-client server reports its accepted client count. This is not a live disconnect detector: a remote peer may disconnect without the count changing until the connection is closed or an operation reports an error. The transport does not provide matchmaking, state replication, or authoritative game rules.
+
+### Encrypting a Game Archive
+
+First create a ZIP or other archive containing every file needed by the game. On Linux and Windows use the portable `vk`; on macOS use the bundled `vkport`:
+
+```sh
+./vkport encrypt-game my-game.zip my-game.vke
+./vkport decrypt-game my-game.vke restored-game.zip
+```
+
+On Linux use `./vk` instead of `./vkport`; on Windows use `vk.exe`. Enter a strong passphrase privately when prompted; encryption asks twice. For automated use, `VEKTKOVE_GAME_PASSPHRASE` supplies the passphrase, but environment variables can be exposed to other processes and logs. Output files must not already exist. The input archive is limited to 64 MiB minus encryption overhead. Encryption uses libsodium Argon2id and authenticated XChaCha20-Poly1305; an incorrect passphrase or modified ciphertext is rejected before output is created. Keep an unencrypted backup and the passphrase secure. This protects an archive at rest, not a running game or its network traffic; recipients who can decrypt the game can copy its contents. Decryption produces an archive that must be extracted separately. This format has not received an independent security audit.
 
 The native app renders scenes. `vk` and the portable runner validate and compile 2D and 3D source but do not display graphics. See `examples/scene3d.vk` and `examples/game2d.vk` for complete programs.
 

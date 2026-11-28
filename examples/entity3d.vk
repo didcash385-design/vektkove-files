@@ -1,0 +1,22 @@
+set frames 0
+import ui
+window "3D Entity Follow" 760 560
+ui_scene3d 20 20 720 500
+ui_camera3d 0 4 14
+ui_light3d 4 7 9 1000
+ui_box3d -3 0 0 1 1 1 "#38A6D8"
+ui_id "player"
+ui_keymove3d "player" "i" 0 0 -0.5
+ui_keymove3d "player" "k" 0 0 0.5
+ui_keymove3d "player" "j" -0.5 0 0
+ui_keymove3d "player" "l" 0.5 0 0
+ui_sphere3d 3 0 0 0.7 "#F15B40"
+ui_id "follower"
+ui_follow3d "follower" "player" 1.5
+ui_animate3d "follower" 0 0.5 0 2
+ui_spin3d "follower" 3
+ui_frame3d
+add frames 1
+clamp frames 0 1000
+ui_end_frame3d
+halt

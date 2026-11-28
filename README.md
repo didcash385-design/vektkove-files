@@ -1,14 +1,14 @@
 Read the [complete Vektkove manual](MANUAL.md) for editor, language, UI Maker, command-line, and VKLINK instructions. The editor and launcher follow the Mac's light or dark appearance. Use **A-** and **A+**, or the View menu, to adjust code and output text size. Select the **Manual** tab to search command names, filter by Code, Logic, Math, Text, or UI, switch between All, 2D, and 3D command tabs, sort command spellings A-Z or group them by category, and page through all results.
 To rebuild, install Apple Command Line Tools and run `make` in this folder. Run `make test` for the interpreter, native UI, and command-line checks. The build contains both x86_64 and arm64 macOS slices. Tests run on the host architecture.
-# Vektkove 1.4.2
+# Vektkove 1.5.0
 
 Vektkove is a custom programming language and native Mac editor. `.vk` source is compiled to Vektkove's `VK01` bytecode and executed by its interpreter. Optional AI commands use `curl` and a separately provided local or hosted model; ordinary programs do not require an AI service.
 
 ## Versioned Files
 
-The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for 1.0.0 through 1.4.2. Each folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
+The repository's `platforms/<os>/<architecture>/<version>/` folders contain separate Windows, Linux, and macOS downloads for published versions through 1.4.2. This source tree is 1.5.0; updated installers and release archives are not published yet. Each download folder includes its version's manual. Older releases also provide `with-manual` archives; the original Windows ZIPs remain available for WinGet. Full source bundles are under `source/<version>/`; the repository root contains the current source. Windows and Linux distributions provide the terminal runner only. The graphical editor, UI Maker, and both 3D renderers require macOS.
 
-Download the archive for your operating system and CPU from the [1.4.2 release](https://github.com/didcash385-design/vektkove-files/releases/tag/v1.4.2). Extract the macOS archive to open `Vektkove.app` and `VektkoveLauncher.app`. Choose x64 for Intel Macs or arm64 for Apple Silicon.
+Until 1.5.0 release archives are published, download the latest published archive for your operating system and CPU from the [1.4.2 release](https://github.com/didcash385-design/vektkove-files/releases/tag/v1.4.2). Extract the macOS archive to open `Vektkove.app` and `VektkoveLauncher.app`. Choose x64 for Intel Macs or arm64 for Apple Silicon.
 
 For Ubuntu and other Linux distributions, choose the x64 archive for Intel/AMD or arm64 for AArch64 systems, extract it, and run:
 
@@ -85,7 +85,7 @@ The interpreter limits programs to 100,000 executed instructions and output to 1
 
 ## Encoding and Compression
 
-Use `vk formats` to list the supported codecs. `vk encode base64 input.txt output.txt` and `vk decode base64 input.txt output.txt` transform files; omit the paths or use `-` for standard input or output. For example, `vk encode zstd+base64 input.txt output.txt` and `vk decode base64+zstd output.txt restored.txt` reverse each other. In `.vk` programs, `encode name "base64"` and `decode name "base64"` update an existing text variable. See the manual for formats and limits.
+Use `vk formats` to list the supported codecs. `vk encode base64 input.txt output.txt` and `vk decode base64 input.txt output.txt` transform files; omit the paths or use `-` for standard input or output. The engine includes Base64/Base64URL, Base32/Base32hex, hexadecimal, Base58, ASCII85, URL/form, HTML, quoted-printable, ROT13/47, binary, and JSON codecs, plus DEFLATE, zlib, gzip, Zstandard, and LZ4. For example, `vk encode zstd+base64 input.txt output.txt` and `vk decode base64+zstd output.txt restored.txt` reverse each other. In `.vk` programs, `encode name "base64"` and `decode name "base64"` update an existing text variable. The Zstandard decoder supports compressed blocks, while its encoder writes valid raw/RLE frames and does not generally reduce size. See the manual and [examples/codecs.vk](examples/codecs.vk) for formats and limits.
 
 ## AI Questions
 
@@ -119,5 +119,9 @@ For native 3D scenes, write `.vk` source directly or use UI Maker; see `examples
 `examples/voxel3d.vk` demonstrates a flyable voxel world with mouse block placement and breaking. The manual describes the controls and 3D scripting commands; voxel edits are currently temporary and do not implement a full survival game.
 
 `examples/boxphysics3d.vk` demonstrates shape-aware box-box and box-sphere collisions, including spinning boxes. Other 3D primitives still use approximate bounding spheres.
+
+`examples/entity3d.vk` demonstrates rule-based object following, source-saved looping translation, and the `clamp` math instruction. `net_peer_count` reports accepted connection slots, not live peer status. The portable runner can encrypt a game archive with `encrypt-game` and `decrypt-game`; see the manual for passphrase and security limitations.
+
+`track`, `track_count`, `track_add`, `track_min`, `track_max`, and `track_reset` provide editable local game statistics. `save` and `load` persist and restore all program variables, including trackers, as validated JSON; see `examples/game_state.vk`. For encryption at rest, package the complete game into an archive and use `encrypt-game`.
 
 2D and 3D frame callbacks now expose `collision_entered` and `collision_exited` events, while `collision_count` reports unique contact pairs for the tick. See `examples/game2d.vk` and `examples/physics3d.vk`.

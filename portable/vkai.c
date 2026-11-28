@@ -254,7 +254,7 @@ static char *vk_ai_http(const char *url, const char *body, const char *key, char
     }
     int ready = fputs("silent\nfail\nmax-time = 30\nconnect-timeout = 10\nmax-filesize = 1048576\nproto = \"=http,https\"\nproto-redir = \"=https\"\nnoproxy = \"127.0.0.1,localhost\"\n", input) >= 0 &&
                 vk_ai_config_value(input, "url", url) &&
-                vk_ai_config_value(input, "user-agent", "Vektkove/1.4.2 (+https://github.com/didcash385-design/vektkove-files)");
+                vk_ai_config_value(input, "user-agent", "Vektkove/1.5.0 (+https://github.com/didcash385-design/vektkove-files)");
     if (!body) ready = ready && fputs("location\nmax-redirs = 3\n", input) >= 0;
     if (body) {
         ready = ready && vk_ai_config_value(input, "header", "Content-Type: application/json") && vk_ai_config_value(input, "data", body);
