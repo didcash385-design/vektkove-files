@@ -3,7 +3,7 @@
 #define OutputDir GetEnv("VK_OUTPUT_DIR")
 #define Version GetEnv("VK_VERSION")
 #if Version == ""
-#define Version "1.4.3"
+#define Version "1.4.4"
 #endif
 
 [Setup]
